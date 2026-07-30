@@ -38,6 +38,7 @@
     background: none; border: none; color: var(--accent); cursor: pointer;
     font-size: 0.95rem; padding: 0; text-decoration: underline;
   }
+  button.linklike:disabled { opacity: 0.4; cursor: default; }
   .source-box {
     background: var(--source-bg); border: 1px solid var(--source-border);
     border-radius: 0.5rem; padding: 1rem 1.25rem; margin-bottom: 1.25rem;
@@ -110,7 +111,8 @@
   </header>
   <div id="fileBar">
     <span id="currentFilePath" title=""></span>
-    <button class="linklike" id="loadFileBtn">Load file...</button>
+    <button class="linklike" id="loadFileBtn">Open file...</button>
+    <button class="linklike" id="revealBtn">Show in folder</button>
   </div>
 
   <div id="ratingView">
@@ -197,27 +199,29 @@ function applyLoadedData(data) {
   }
   currentIndex = items.length ? data.resumeIndex : 0;
   const pathEl = document.getElementById('currentFilePath');
-  pathEl.textContent = data.currentFile;
-  pathEl.title = data.currentFile;
+  pathEl.textContent = data.currentFile || '(no file loaded)';
+  pathEl.title = data.currentFile || '';
+  document.getElementById('revealBtn').disabled = !data.currentFile;
   renderItem();
 }
 
 document.getElementById('loadFileBtn').onclick = async () => {
-  const path = window.prompt(
-    'Path to a comparison JSON file:',
-    document.getElementById('currentFilePath').title || '');
-  if (!path) return;
   try {
-    const res = await fetch('/api/open', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path }),
-    });
+    const res = await fetch('/api/open-dialog', { method: 'POST' });
     const data = await res.json();
+    if (data.cancelled) return;
     if (!res.ok) { alert(data.error || 'Failed to load file'); return; }
     applyLoadedData(data);
   } catch (e) {
     alert('Failed to load file: ' + e);
+  }
+};
+
+document.getElementById('revealBtn').onclick = async () => {
+  try {
+    await fetch('/api/reveal', { method: 'POST' });
+  } catch (e) {
+    alert('Failed to open folder: ' + e);
   }
 };
 
@@ -234,7 +238,11 @@ function renderItem() {
 
   if (!items.length) {
     document.getElementById('sourceText').textContent = '';
-    document.getElementById('rankedList').innerHTML = '<div class="empty">No items found in the data file.</div>';
+    document.getElementById('rankedList').innerHTML = '<div class="empty">'
+      + (document.getElementById('currentFilePath').title
+        ? 'No items to rate in this file.'
+        : 'No file loaded &mdash; click "Open file..." above to choose one.')
+      + '</div>';
     document.getElementById('progress').textContent = '';
     return;
   }

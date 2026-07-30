@@ -15,6 +15,10 @@ runs/
 # Merged model for serving (8+ GB; recreate with scripts/merge_adapter.py)
 models/
 
+# PyInstaller build output for the rating_webapp standalone exe (15+ MB;
+# rebuild with the pyinstaller command in comparison/rating_webapp/README.md)
+comparison/rating_webapp/dist/
+
 # Large local dataset copies are kept, but exclude HF cache artifacts
 .cache/
 /.vs

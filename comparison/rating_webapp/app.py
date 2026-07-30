@@ -7,21 +7,24 @@ Source sentence into preference order, or marks a translation "bad" to
 exclude it. Ratings are written back into that same file (each
 Translations[i] gets a "Rating": {ranked, excluded} field), so reopening the
 file resumes exactly where rating left off, with every earlier choice intact.
-Use the "Load file..." button in the page to switch to a different comparison
-JSON at any time.
+Use "Open file..." in the page to switch to a different comparison JSON at
+any time, and "Show in folder" to locate the current file on disk (e.g. to
+send it back once rating is done).
 
 Run:
   python app.py
-  (then browse http://localhost:5050/)
+  (a browser tab opens automatically at http://localhost:5050/)
 """
 
 import json
 import os
+import subprocess
 import threading
+import webbrowser
 
 from flask import Flask, jsonify, render_template, request
 
-from settings import DATA_FILE, LAST_FILE_POINTER, LEGACY_RESULTS_FILE, PORT
+from settings import DATA_FILE, HOST, LAST_FILE_POINTER, LEGACY_RESULTS_FILE, PORT
 
 app = Flask(__name__)
 state_lock = threading.Lock()
@@ -33,7 +36,7 @@ def _initial_file():
             remembered = f.read().strip()
         if remembered and os.path.isfile(remembered):
             return remembered
-    return DATA_FILE
+    return DATA_FILE if os.path.isfile(DATA_FILE) else None
 
 
 current_file = {"path": _initial_file()}
@@ -42,6 +45,39 @@ current_file = {"path": _initial_file()}
 def _remember_current_file():
     with open(LAST_FILE_POINTER, "w", encoding="utf-8") as f:
         f.write(current_file["path"])
+
+
+def _ask_open_path():
+    """Native "Open" dialog on this machine (the server IS the user's own
+    computer in the packaged desktop app, so this pops up on their screen)."""
+    import tkinter as tk
+    from tkinter import filedialog
+
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+    initial_dir = os.path.dirname(current_file["path"]) if current_file["path"] else None
+    path = filedialog.askopenfilename(
+        title="Open comparison JSON",
+        filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+        initialdir=initial_dir if initial_dir and os.path.isdir(initial_dir) else None,
+    )
+    root.destroy()
+    return path or None
+
+
+def _open_path(path):
+    if not os.path.isfile(path):
+        return jsonify({"error": f"File not found: {path}"}), 400
+    try:
+        with open(path, encoding="utf-8-sig") as f:
+            json.load(f)
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        return jsonify({"error": f"Not a valid JSON file: {e}"}), 400
+    with state_lock:
+        current_file["path"] = path
+        _remember_current_file()
+    return _items_response()
 
 
 def load_data():
@@ -108,6 +144,8 @@ def load_items(data):
 
 
 def _items_response():
+    if not current_file["path"]:
+        return jsonify({"items": [], "resumeIndex": 0, "currentFile": None})
     data = load_data()
     items = load_items(data)
     # resume where the rater left off: first item with no saved rating
@@ -138,17 +176,24 @@ def api_open():
     path = (payload.get("path") or "").strip().strip('"')
     if not path:
         return jsonify({"error": "No path given"}), 400
-    if not os.path.isfile(path):
-        return jsonify({"error": f"File not found: {path}"}), 400
-    try:
-        with open(path, encoding="utf-8-sig") as f:
-            json.load(f)
-    except (json.JSONDecodeError, UnicodeDecodeError) as e:
-        return jsonify({"error": f"Not a valid JSON file: {e}"}), 400
-    with state_lock:
-        current_file["path"] = path
-        _remember_current_file()
-    return _items_response()
+    return _open_path(path)
+
+
+@app.route("/api/open-dialog", methods=["POST"])
+def api_open_dialog():
+    path = _ask_open_path()
+    if not path:
+        return jsonify({"cancelled": True})
+    return _open_path(path)
+
+
+@app.route("/api/reveal", methods=["POST"])
+def api_reveal():
+    path = current_file["path"]
+    if not path:
+        return jsonify({"error": "No file is open"}), 400
+    subprocess.Popen(["explorer", f"/select,{path}"])
+    return jsonify({"status": "ok"})
 
 
 @app.route("/api/save", methods=["POST"])
@@ -169,6 +214,8 @@ def api_save():
 
 @app.route("/api/summary", methods=["GET"])
 def api_summary():
+    if not current_file["path"]:
+        return jsonify({"perTranslator": [], "itemsRated": 0, "itemsTotal": 0})
     data = load_data()
     items = load_items(data)
 
@@ -215,4 +262,9 @@ def api_summary():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=PORT, debug=False)
+    url = f"http://127.0.0.1:{PORT}/"
+    print("Translation Preference Rating tool is running.")
+    print(f"  {url}")
+    print("Keep this window open while you work; close it when you're done.")
+    threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+    app.run(host=HOST, port=PORT, debug=False)

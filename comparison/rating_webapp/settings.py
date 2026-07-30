@@ -1,7 +1,23 @@
 # All settings can be overridden with environment variables.
 import os
+import sys
 
-_here = os.path.dirname(os.path.abspath(__file__))
+
+def _app_dir():
+    if getattr(sys, "frozen", False):
+        # Running as a bundled exe (PyInstaller --onefile): use the exe's own
+        # folder, not sys._MEIPASS (a temp folder deleted on exit), so
+        # remembered state (last_file.txt) survives between runs.
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+_here = _app_dir()
+
+# Host to bind to. 127.0.0.1 (default) keeps this reachable only from this
+# machine -- appropriate for the packaged single-user desktop app. Set
+# HOST=0.0.0.0 to allow other devices on the network to connect instead.
+HOST = os.environ.get('HOST', '127.0.0.1')
 
 # The comparison data: an array of {Translators: [{Translator: name}, ...],
 # Translations: [{Source, Targets: [{Target: text}, ...], Rating}, ...]}
