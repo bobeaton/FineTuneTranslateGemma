@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Release</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">x64</Platform>
+    <ProjectGuid>{E1C0D6A2-6B0F-4B1E-9A2C-1D5F3A9B7C10}</ProjectGuid>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>EncConverterCompare</RootNamespace>
+    <AssemblyName>EncConverterCompare</AssemblyName>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <FileAlignment>512</FileAlignment>
+    <Deterministic>true</Deterministic>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <LangVersion>8.0</LangVersion>
+    <PlatformTarget>x64</PlatformTarget>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Release|x64'">
+    <OutputPath>bin\x64\Release\</OutputPath>
+    <Optimize>true</Optimize>
+    <DebugType>pdbonly</DebugType>
+    <ErrorReport>prompt</ErrorReport>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Net.Http" />
+    <Reference Include="System.Xml" />
+    <Reference Include="System.Xml.Linq" />
+    <!-- Consume the already-built encoding-converters-core assemblies (no rebuild of
+         that solution needed); Private=True copies them into our own bin folder. -->
+    <Reference Include="ECInterfaces">
+      <HintPath>..\..\..\..\Users\pete_\source\repos\encoding-converters-core\output\x64\Release\ECInterfaces.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="EcTranslators">
+      <HintPath>..\..\..\..\Users\pete_\source\repos\encoding-converters-core\output\x64\Release\EcTranslators.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="SilEncConverters40">
+      <HintPath>..\..\..\..\Users\pete_\source\repos\encoding-converters-core\output\x64\Release\SilEncConverters40.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>..\..\..\..\Users\pete_\source\repos\encoding-converters-core\output\x64\Release\Newtonsoft.Json.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+</Project>

@@ -1,0 +1,13 @@
+# The default Linux torch wheel bundles CUDA, so one image serves both CPU and
+# GPU (--gpus) runs. This makes the image large (~10 GB) but matches how the
+# NLLB translator containers work.
+torch
+transformers>=4.57.0
+accelerate
+bitsandbytes>=0.48.0
+peft>=0.17.0
+huggingface_hub
+sentencepiece
+protobuf
+flask
+gevent

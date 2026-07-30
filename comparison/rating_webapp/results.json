@@ -1,0 +1,26 @@
+{
+  "0-0": {
+    "source": "    0065 TTB Genesis 49:8 - 50:26 (Words 3490)",
+    "ranked": [
+      {
+        "text": "मुल्‍के-उज्‍जे च इक बेइलजाम माह़णू रैंह़दा था, ",
+        "translators": [
+          "TranslateGemma-From-HCL"
+        ]
+      },
+      {
+        "text": "ऊस देस्‍से च इक माह़णू था, ",
+        "translators": [
+          "NLLB-From-NLT"
+        ]
+      },
+      {
+        "text": "ऊत्‍स देस्‍से च इक माह़णू रैंह़दा था। ",
+        "translators": [
+          "NLLB-From-HCL"
+        ]
+      }
+    ],
+    "excluded": []
+  }
+}

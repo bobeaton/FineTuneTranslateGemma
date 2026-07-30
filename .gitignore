@@ -1,0 +1,20 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# C#/.Net build files
+bin/
+obj/
+
+# Training outputs (checkpoints are large)
+output/
+runs/
+*.log
+
+# Merged model for serving (8+ GB; recreate with scripts/merge_adapter.py)
+models/
+
+# Large local dataset copies are kept, but exclude HF cache artifacts
+.cache/
+/.vs

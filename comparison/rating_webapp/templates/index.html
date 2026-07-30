@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Translation Preference Rating</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1a1a1a; --muted: #6b7280; --border: #d1d5db;
+    --card-bg: #f9fafb; --card-border: #d1d5db; --accent: #2563eb;
+    --bad-bg: #fef2f2; --bad-border: #fca5a5; --bad-fg: #991b1b;
+    --source-bg: #eff6ff; --source-border: #93c5fd;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111827; --fg: #e5e7eb; --muted: #9ca3af; --border: #374151;
+      --card-bg: #1f2937; --card-border: #374151; --accent: #60a5fa;
+      --bad-bg: #2a1616; --bad-border: #7f1d1d; --bad-fg: #fca5a5;
+      --source-bg: #172554; --source-border: #1e40af;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--fg);
+  }
+  .wrap { max-width: 46rem; margin: 0 auto; padding: 1.5rem 1.25rem 3rem; }
+  header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.35rem; flex-wrap: wrap; gap: 0.5rem; }
+  h1 { font-size: 1.25rem; margin: 0; }
+  #progress { color: var(--muted); font-size: 0.95rem; }
+  #fileBar {
+    display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;
+    color: var(--muted); font-size: 0.85rem;
+  }
+  #currentFilePath {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 28rem;
+  }
+  a.linklike, button.linklike {
+    background: none; border: none; color: var(--accent); cursor: pointer;
+    font-size: 0.95rem; padding: 0; text-decoration: underline;
+  }
+  .source-box {
+    background: var(--source-bg); border: 1px solid var(--source-border);
+    border-radius: 0.5rem; padding: 1rem 1.25rem; margin-bottom: 1.25rem;
+    font-size: 1.15rem; line-height: 1.6;
+  }
+  .source-label { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--muted); margin-bottom: 0.35rem; }
+  .hint { color: var(--muted); font-size: 0.9rem; margin-bottom: 0.75rem; }
+  ul.cardlist { list-style: none; margin: 0; padding: 0; }
+  li.card {
+    display: flex; align-items: center; gap: 0.6rem;
+    background: var(--card-bg); border: 1px solid var(--card-border);
+    border-radius: 0.5rem; padding: 0.7rem 0.8rem; margin-bottom: 0.6rem;
+    font-size: 1.05rem; line-height: 1.5;
+  }
+  li.card.dragging { opacity: 0.4; }
+  li.card.drag-over { border-color: var(--accent); border-style: dashed; }
+  .rank-badge {
+    flex: 0 0 auto; width: 1.8rem; height: 1.8rem; border-radius: 50%;
+    background: var(--accent); color: white; display: flex; align-items: center;
+    justify-content: center; font-weight: 600; font-size: 0.95rem;
+  }
+  .grab {
+    flex: 0 0 auto; cursor: grab; color: var(--muted); font-size: 1.1rem;
+    user-select: none; padding: 0 0.1rem;
+  }
+  .grab:active { cursor: grabbing; }
+  .card-text { flex: 1 1 auto; }
+  .btn-icon {
+    flex: 0 0 auto; border: none; background: transparent; cursor: pointer;
+    font-size: 1.1rem; line-height: 1; padding: 0.3rem; border-radius: 0.3rem;
+    color: var(--muted);
+  }
+  .btn-icon:hover { background: rgba(128,128,128,0.15); }
+  .order-btns { display: flex; flex-direction: column; gap: 1px; flex: 0 0 auto; }
+  .order-btns button { font-size: 0.7rem; padding: 0 0.25rem; line-height: 1.2; }
+  .bad-btn { color: #dc2626; font-weight: bold; }
+  #excludedSection { margin-top: 1.25rem; }
+  #excludedSection h3 { font-size: 0.9rem; color: var(--muted); margin: 0 0 0.5rem; }
+  li.card.excluded {
+    background: var(--bad-bg); border-color: var(--bad-border); color: var(--bad-fg);
+  }
+  li.card.excluded .card-text { text-decoration: line-through; opacity: 0.85; }
+  .restore-btn { color: #16a34a; }
+  nav.footer {
+    display: flex; justify-content: space-between; margin-top: 1.75rem;
+  }
+  button.nav-btn {
+    font-size: 1rem; padding: 0.55rem 1.4rem; border-radius: 0.4rem; border: 1px solid var(--border);
+    background: var(--card-bg); color: var(--fg); cursor: pointer;
+  }
+  button.nav-btn.primary { background: var(--accent); color: white; border-color: var(--accent); }
+  button.nav-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+  th, td { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; font-size: 0.85rem; text-transform: uppercase; }
+  #saveStatus { color: var(--muted); font-size: 0.85rem; min-height: 1.2em; margin-top: 0.4rem; }
+  .empty { color: var(--muted); padding: 2rem 0; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Translation Preference Rating</h1>
+    <div>
+      <span id="progress"></span>
+      &nbsp;·&nbsp;
+      <button class="linklike" id="summaryLink">View Summary</button>
+    </div>
+  </header>
+  <div id="fileBar">
+    <span id="currentFilePath" title=""></span>
+    <button class="linklike" id="loadFileBtn">Load file...</button>
+  </div>
+
+  <div id="ratingView">
+    <div class="source-box">
+      <div class="source-label">Source</div>
+      <div id="sourceText"></div>
+    </div>
+    <div class="hint">Drag &#9863; to reorder &mdash; best translation on top. Click &#10005; to mark a translation as bad (it won't be counted).</div>
+    <ul class="cardlist" id="rankedList"></ul>
+
+    <div id="excludedSection" style="display:none">
+      <h3>Excluded (not counted)</h3>
+      <ul class="cardlist" id="excludedList"></ul>
+    </div>
+
+    <div id="saveStatus"></div>
+
+    <nav class="footer">
+      <button class="nav-btn" id="backBtn">&larr; Back</button>
+      <button class="nav-btn primary" id="nextBtn">Next &rarr;</button>
+    </nav>
+  </div>
+
+  <div id="summaryView" style="display:none">
+    <p id="summaryProgress" class="hint"></p>
+    <table id="summaryTable">
+      <thead>
+        <tr><th>Translator</th><th>Avg&nbsp;Rank</th><th>1st&nbsp;Place</th><th>Ranked</th><th>Bad</th><th>Seen</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <nav class="footer">
+      <button class="nav-btn primary" id="backToRatingBtn">&larr; Back to Rating</button>
+      <span></span>
+    </nav>
+  </div>
+</div>
+
+<script>
+let items = [];
+let itemState = {};   // itemId -> { ranked: [cardId,...], excluded: [cardId,...] }
+let currentIndex = 0;
+let draggedId = null;
+
+function cardById(item, id) {
+  return item.cards.find(c => c.id === id);
+}
+
+function shuffle(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function buildStateFromResult(item, result) {
+  const findId = group => {
+    const card = item.cards.find(c => c.text === group.text);
+    return card ? card.id : null;
+  };
+  const ranked = result.ranked.map(findId).filter(Boolean);
+  const excluded = result.excluded.map(findId).filter(Boolean);
+  // any cards not accounted for (shouldn't normally happen) go to the end of ranked
+  const seen = new Set([...ranked, ...excluded]);
+  item.cards.forEach(c => { if (!seen.has(c.id)) ranked.push(c.id); });
+  return { ranked, excluded };
+}
+
+async function loadItems() {
+  const res = await fetch('/api/items');
+  const data = await res.json();
+  applyLoadedData(data);
+}
+
+function applyLoadedData(data) {
+  items = data.items;
+  itemState = {};
+  for (const item of items) {
+    if (item.rating) {
+      itemState[item.id] = buildStateFromResult(item, item.rating);
+    }
+  }
+  currentIndex = items.length ? data.resumeIndex : 0;
+  const pathEl = document.getElementById('currentFilePath');
+  pathEl.textContent = data.currentFile;
+  pathEl.title = data.currentFile;
+  renderItem();
+}
+
+document.getElementById('loadFileBtn').onclick = async () => {
+  const path = window.prompt(
+    'Path to a comparison JSON file:',
+    document.getElementById('currentFilePath').title || '');
+  if (!path) return;
+  try {
+    const res = await fetch('/api/open', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }),
+    });
+    const data = await res.json();
+    if (!res.ok) { alert(data.error || 'Failed to load file'); return; }
+    applyLoadedData(data);
+  } catch (e) {
+    alert('Failed to load file: ' + e);
+  }
+};
+
+function ensureState(item) {
+  if (!itemState[item.id]) {
+    itemState[item.id] = { ranked: shuffle(item.cards.map(c => c.id)), excluded: [] };
+  }
+  return itemState[item.id];
+}
+
+function renderItem() {
+  document.getElementById('ratingView').style.display = '';
+  document.getElementById('summaryView').style.display = 'none';
+
+  if (!items.length) {
+    document.getElementById('sourceText').textContent = '';
+    document.getElementById('rankedList').innerHTML = '<div class="empty">No items found in the data file.</div>';
+    document.getElementById('progress').textContent = '';
+    return;
+  }
+
+  const item = items[currentIndex];
+  const state = ensureState(item);
+  document.getElementById('progress').textContent = `Item ${currentIndex + 1} of ${items.length}`;
+  document.getElementById('sourceText').textContent = item.source;
+
+  const rankedList = document.getElementById('rankedList');
+  rankedList.innerHTML = '';
+  state.ranked.forEach((id, i) => {
+    const card = cardById(item, id);
+    rankedList.appendChild(buildCard(card, i, false));
+  });
+
+  const excludedSection = document.getElementById('excludedSection');
+  const excludedList = document.getElementById('excludedList');
+  excludedList.innerHTML = '';
+  if (state.excluded.length) {
+    excludedSection.style.display = '';
+    state.excluded.forEach(id => {
+      const card = cardById(item, id);
+      excludedList.appendChild(buildCard(card, null, true));
+    });
+  } else {
+    excludedSection.style.display = 'none';
+  }
+
+  document.getElementById('backBtn').disabled = currentIndex === 0;
+  document.getElementById('nextBtn').textContent =
+    currentIndex === items.length - 1 ? 'Finish ✓' : 'Next →';
+  document.getElementById('saveStatus').textContent = '';
+}
+
+function buildCard(card, rankIndex, excluded) {
+  const li = document.createElement('li');
+  li.className = 'card' + (excluded ? ' excluded' : '');
+  li.dataset.id = card.id;
+
+  if (!excluded) {
+    const grab = document.createElement('span');
+    grab.className = 'grab';
+    grab.textContent = '⠿';
+    grab.title = 'Drag to reorder';
+    grab.draggable = true;
+    grab.addEventListener('dragstart', e => {
+      draggedId = card.id;
+      li.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    grab.addEventListener('dragend', () => li.classList.remove('dragging'));
+    li.appendChild(grab);
+
+    const badge = document.createElement('span');
+    badge.className = 'rank-badge';
+    badge.textContent = rankIndex + 1;
+    li.appendChild(badge);
+  }
+
+  const text = document.createElement('span');
+  text.className = 'card-text';
+  text.textContent = card.text;
+  li.appendChild(text);
+
+  if (excluded) {
+    const restore = document.createElement('button');
+    restore.className = 'btn-icon restore-btn';
+    restore.title = 'Restore to ranking';
+    restore.textContent = '↺';
+    restore.onclick = () => moveCard(card.id, 'excluded', 'ranked');
+    li.appendChild(restore);
+  } else {
+    const orderBtns = document.createElement('span');
+    orderBtns.className = 'order-btns';
+    const up = document.createElement('button');
+    up.className = 'btn-icon'; up.textContent = '▲'; up.title = 'Move up';
+    up.onclick = () => nudge(card.id, -1);
+    const down = document.createElement('button');
+    down.className = 'btn-icon'; down.textContent = '▼'; down.title = 'Move down';
+    down.onclick = () => nudge(card.id, 1);
+    orderBtns.appendChild(up); orderBtns.appendChild(down);
+    li.appendChild(orderBtns);
+
+    const bad = document.createElement('button');
+    bad.className = 'btn-icon bad-btn';
+    bad.title = 'Mark as a bad translation (excluded)';
+    bad.textContent = '✕';
+    bad.onclick = () => moveCard(card.id, 'ranked', 'excluded');
+    li.appendChild(bad);
+
+    li.addEventListener('dragover', e => {
+      e.preventDefault();
+      li.classList.add('drag-over');
+    });
+    li.addEventListener('dragleave', () => li.classList.remove('drag-over'));
+    li.addEventListener('drop', e => {
+      e.preventDefault();
+      li.classList.remove('drag-over');
+      if (draggedId && draggedId !== card.id) reorder(draggedId, card.id);
+      draggedId = null;
+    });
+  }
+
+  return li;
+}
+
+function currentState() { return itemState[items[currentIndex].id]; }
+
+function reorder(draggedCardId, targetCardId) {
+  const state = currentState();
+  const from = state.ranked.indexOf(draggedCardId);
+  const to = state.ranked.indexOf(targetCardId);
+  if (from === -1 || to === -1) return;
+  state.ranked.splice(from, 1);
+  state.ranked.splice(to, 0, draggedCardId);
+  renderItem();
+  autoSave();
+}
+
+function nudge(cardId, delta) {
+  const state = currentState();
+  const i = state.ranked.indexOf(cardId);
+  const j = i + delta;
+  if (i === -1 || j < 0 || j >= state.ranked.length) return;
+  [state.ranked[i], state.ranked[j]] = [state.ranked[j], state.ranked[i]];
+  renderItem();
+  autoSave();
+}
+
+function moveCard(cardId, fromKey, toKey) {
+  const state = currentState();
+  const i = state[fromKey].indexOf(cardId);
+  if (i === -1) return;
+  state[fromKey].splice(i, 1);
+  state[toKey].push(cardId);
+  renderItem();
+  autoSave();
+}
+
+async function autoSave() {
+  const item = items[currentIndex];
+  const state = currentState();
+  const group = id => {
+    const c = cardById(item, id);
+    return { text: c.text, translators: c.translators };
+  };
+  const payload = {
+    itemId: item.id,
+    source: item.source,
+    ranked: state.ranked.map(group),
+    excluded: state.excluded.map(group),
+  };
+  document.getElementById('saveStatus').textContent = 'Saving...';
+  try {
+    await fetch('/api/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    document.getElementById('saveStatus').textContent = 'Saved.';
+  } catch (e) {
+    document.getElementById('saveStatus').textContent = 'Save failed: ' + e;
+  }
+}
+
+document.getElementById('backBtn').onclick = () => {
+  if (currentIndex > 0) { currentIndex--; renderItem(); }
+};
+document.getElementById('nextBtn').onclick = async () => {
+  await autoSave();
+  if (currentIndex < items.length - 1) {
+    currentIndex++;
+    renderItem();
+  } else {
+    showSummary();
+  }
+};
+
+async function showSummary() {
+  const res = await fetch('/api/summary');
+  const data = await res.json();
+  document.getElementById('ratingView').style.display = 'none';
+  document.getElementById('summaryView').style.display = '';
+  document.getElementById('summaryProgress').textContent =
+    `${data.itemsRated} of ${data.itemsTotal} items rated.`;
+  const tbody = document.querySelector('#summaryTable tbody');
+  tbody.innerHTML = '';
+  for (const row of data.perTranslator) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${row.translator}</td>
+      <td>${row.avgRank !== null ? row.avgRank.toFixed(2) : '—'}</td>
+      <td>${row.firstPlaceCount}</td>
+      <td>${row.timesRanked}</td>
+      <td>${row.badCount}</td>
+      <td>${row.timesSeen}</td>`;
+    tbody.appendChild(tr);
+  }
+}
+
+document.getElementById('summaryLink').onclick = showSummary;
+document.getElementById('backToRatingBtn').onclick = () => {
+  document.getElementById('summaryView').style.display = 'none';
+  document.getElementById('ratingView').style.display = '';
+  renderItem();
+};
+
+loadItems();
+</script>
+</body>
+</html>

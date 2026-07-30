@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>ParallelizeTexts</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<div id="menubar">
+  <div class="menu">
+    <button class="menu-btn" data-menu="file">File</button>
+    <div class="menu-dropdown" data-menu-panel="file">
+      <div class="menu-submenu-parent">
+        <button class="menu-submenu-label">Recent Projects</button>
+        <div class="menu-submenu" id="recentProjectsSubmenu"></div>
+      </div>
+      <div class="menu-sep"></div>
+      <button data-action="newProject">New Project</button>
+      <button data-action="openProject">Open Project&hellip;</button>
+      <button data-action="save">Save<span class="menu-shortcut">Ctrl+S</span></button>
+      <div class="menu-submenu-parent">
+        <button class="menu-submenu-label">Save As<span class="menu-shortcut">Ctrl+A</span></button>
+        <div class="menu-submenu">
+          <button data-action="saveAsProject">Project&hellip;</button>
+          <button data-action="saveAsComparisonJson">Comparison JSON&hellip;</button>
+          <button data-action="saveAsCsv">CSV (&#124; delimited)&hellip;</button>
+        </div>
+      </div>
+      <div class="menu-sep"></div>
+      <button data-action="importSource">Import Source&hellip;</button>
+      <button data-action="importTarget">Import Target&hellip;</button>
+      <div class="menu-sep"></div>
+      <button data-action="exit">Exit</button>
+    </div>
+  </div>
+  <div class="menu">
+    <button class="menu-btn" data-menu="edit">Edit</button>
+    <div class="menu-dropdown" data-menu-panel="edit">
+      <button data-action="openFindReplace">Find/Replace&hellip;</button>
+      <button data-action="openSavedSearches">Saved Searches&hellip;</button>
+      <div class="menu-sep"></div>
+      <div class="menu-submenu-parent">
+        <button class="menu-submenu-label" data-action="breakBothIntoSentences">Break into Sentences</button>
+        <div class="menu-submenu" id="breakSentencesSubmenu"></div>
+      </div>
+    </div>
+  </div>
+  <div class="menu">
+    <button class="menu-btn" data-menu="settings">Settings</button>
+    <div class="menu-dropdown" data-menu-panel="settings">
+      <button data-action="openFontSettings">Fonts&hellip;</button>
+    </div>
+  </div>
+  <div id="titleInfo"></div>
+</div>
+
+<div id="recoveryBanner" class="banner" hidden>
+  <span>A recovered autosave from a previous session is available.</span>
+  <button id="recoveryRestore">Restore</button>
+  <button id="recoveryDiscard">Discard</button>
+</div>
+
+<div id="targetTabs" hidden></div>
+
+<div id="gridContainer">
+  <table id="grid">
+    <thead>
+      <tr id="gridHeaderRow"></tr>
+    </thead>
+    <tbody id="gridBody"></tbody>
+  </table>
+</div>
+
+<div id="cellContextMenu" class="context-menu" hidden>
+  <button data-ctx="quoteInsertMode">Click to insert quotes (Left)/Commas (Right)&hellip;</button>
+  <div class="menu-sep"></div>
+  <button data-ctx="deleteSourceCell">Delete Source cell</button>
+  <button data-ctx="deleteTargetCell">Delete Target cell</button>
+  <button data-ctx="deleteRow">Delete row (both)</button>
+</div>
+
+<div id="statusbar">
+  <span id="statusText">No source loaded.</span>
+</div>
+
+<div id="modalOverlay" class="modal-overlay" hidden>
+  <div id="fontModal" class="modal">
+    <h2>Column Fonts</h2>
+    <div class="font-row" data-col="info">
+      <label>Info column</label>
+      <input type="text" class="font-family" list="fontSuggestions" />
+      <input type="number" class="font-size" min="6" max="72" />
+    </div>
+    <div class="font-row" data-col="source">
+      <label>Source column</label>
+      <input type="text" class="font-family" list="fontSuggestions" />
+      <input type="number" class="font-size" min="6" max="72" />
+    </div>
+    <div class="font-row" data-col="target">
+      <label>Target column</label>
+      <input type="text" class="font-family" list="fontSuggestions" />
+      <input type="number" class="font-size" min="6" max="72" />
+    </div>
+    <datalist id="fontSuggestions">
+      <option value="Nirmala UI">
+      <option value="Noto Sans Devanagari">
+      <option value="Mangal">
+      <option value="Aparajita">
+      <option value="Segoe UI">
+      <option value="Consolas">
+      <option value="monospace">
+      <option value="sans-serif">
+    </datalist>
+    <div class="modal-buttons">
+      <button id="fontApply">Apply</button>
+      <button id="fontCancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div id="findReplacePanel" class="floating-panel" hidden>
+  <div class="panel-header">
+    <span>Find / Replace</span>
+    <button class="panel-close" id="frCloseBtn" title="Close">&times;</button>
+  </div>
+  <div class="panel-body">
+    <label class="fr-label">Find what</label>
+    <input type="text" id="frFind" list="frFindHistory" autocomplete="off" />
+    <datalist id="frFindHistory"></datalist>
+
+    <label class="fr-label">Replace with</label>
+    <input type="text" id="frReplace" autocomplete="off" />
+
+    <label class="fr-label">Column</label>
+    <select id="frColumn"></select>
+
+    <div class="fr-checks">
+      <label><input type="checkbox" id="frRegex" /> Regular expression</label>
+      <label><input type="checkbox" id="frCase" /> Case sensitive</label>
+      <label><input type="checkbox" id="frWholeWord" /> Whole word</label>
+      <label><input type="checkbox" id="frWrap" checked /> Wrap around</label>
+      <label><input type="checkbox" id="frPin" /> Add to Edit menu</label>
+    </div>
+
+    <div id="frMatchInfo" class="fr-matchinfo"></div>
+
+    <div class="fr-buttons">
+      <button id="frFindNextBtn">Find Next</button>
+      <button id="frReplaceBtn">Replace</button>
+      <button id="frReplaceAllBtn">Replace All</button>
+    </div>
+  </div>
+</div>
+
+<div id="savedSearchesOverlay" class="modal-overlay" hidden>
+  <div class="modal" id="savedSearchesModal">
+    <h2>Saved Searches</h2>
+    <div id="savedSearchesList"></div>
+    <div class="modal-buttons">
+      <button id="savedSearchesCloseBtn">Close</button>
+    </div>
+  </div>
+</div>
+
+<div id="unsavedChangesOverlay" class="modal-overlay" hidden>
+  <div class="modal" id="unsavedChangesModal">
+    <h2>Unsaved Changes</h2>
+    <p id="unsavedChangesText"></p>
+    <div class="modal-buttons">
+      <button id="unsavedSaveBtn">Save</button>
+      <button id="unsavedDiscardBtn">Don't Save</button>
+      <button id="unsavedCancelBtn">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div id="overwriteWarningOverlay" class="modal-overlay" hidden>
+  <div class="modal" id="overwriteWarningModal">
+    <h2>File Already Exists</h2>
+    <p id="overwriteWarningText"></p>
+    <div class="modal-buttons">
+      <button id="overwriteOverwriteBtn">Overwrite</button>
+      <button id="overwriteSaveAsBtn">Save As&hellip;</button>
+      <button id="overwriteCancelBtn">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+
+<script src="app.js"></script>
+</body>
+</html>
