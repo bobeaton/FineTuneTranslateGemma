@@ -26,6 +26,40 @@ function callHost(action, payload) {
 }
 
 /* =========================================================================
+ * Fonts (state shape + CSS stack building -- declared up top since `state`
+ * below needs the defaults; see the "Fonts" section further down for the
+ * font modal itself)
+ * ========================================================================= */
+
+// The font modal only ever shows/stores a plain font name (e.g. "Nirmala
+// UI") -- no quotes, no generic-family fallback -- since that raw CSS
+// syntax is exactly what made this unusable for a non-technical user: typing
+// over "Nirmala UI", sans-serif without clearing it exactly right silently
+// produces a broken font-family list that visibly changes nothing, which is
+// indistinguishable from "the dialog doesn't work." The generic fallback
+// per column is fixed and always appended by cssFontStack() instead.
+const FONT_FALLBACKS = { info: 'monospace', source: 'sans-serif', target: 'sans-serif' };
+const DEFAULT_FONTS = {
+  info:   { family: 'Consolas', size: 12 },
+  source: { family: 'Nirmala UI', size: 16 },
+  target: { family: 'Nirmala UI', size: 16 },
+};
+
+function cssFontStack(col, family) {
+  const name = (family || '').trim();
+  return name ? `"${name.replace(/"/g, '')}", ${FONT_FALLBACKS[col]}` : FONT_FALLBACKS[col];
+}
+
+// Recovers a plain name from either a fresh plain value ("Nirmala UI") or an
+// old project's pre-fix full CSS stack ("\"Nirmala UI\", sans-serif"), so a
+// project saved before this fix still loads correctly instead of doubling
+// up into a broken stack via cssFontStack().
+function sanitizeFontFamily(raw) {
+  if (!raw) return '';
+  return String(raw).split(',')[0].trim().replace(/^["']|["']$/g, '').trim();
+}
+
+/* =========================================================================
  * State
  * ========================================================================= */
 
@@ -39,9 +73,9 @@ const state = {
   targets: [],           // [{name, filePath, lines: string[]}]
   activeTargetIndex: -1,
   fonts: {
-    info:   { family: 'Consolas, monospace', size: 12 },
-    source: { family: '"Nirmala UI", sans-serif', size: 16 },
-    target: { family: '"Nirmala UI", sans-serif', size: 16 },
+    info:   { ...DEFAULT_FONTS.info },
+    source: { ...DEFAULT_FONTS.source },
+    target: { ...DEFAULT_FONTS.target },
   },
   dirty: false,
 };
@@ -471,6 +505,28 @@ function deleteRow(row) {
   else selection.mode = 'none';
 }
 
+// Merges the cell below (in the same column only) into this one, separated
+// by a space, then removes that now-empty-below cell so every row after it
+// shifts up. The other column (source vs. target) and its row count are
+// untouched -- this is a single-column operation, mirroring deleteCell.
+function combineCellWithNext(col, row) {
+  const arr = col === 'source' ? state.sourceLines : activeTarget()?.lines;
+  if (!arr || row + 1 >= arr.length) return;
+  pushUndo({
+    type: 'combineCell', col, row,
+    previousValue: arr[row], nextValue: arr[row + 1],
+    targetIndex: state.activeTargetIndex,
+  });
+  const beforeSourceLen = state.sourceLines.length;
+  arr[row] = arr[row] + ' ' + arr[row + 1];
+  arr.splice(row + 1, 1);
+  markDirty();
+  if (col === 'source') notifyIfTargetsDrifted(beforeSourceLen);
+  renderBodyAndTabs();
+  selection.mode = 'none';
+  selectCellNoEdit(col, Math.min(row, rowCount() - 1));
+}
+
 // Reverses the most recent deleteCell/deleteRow, re-inserting the removed
 // text at the same index. Targets the target column by stored index (not
 // "whichever tab is active now"), so undoing still lands correctly even if
@@ -507,6 +563,21 @@ function performUndo() {
     renderAll();
     selectRow(entry.row);
     showToast('Undid row delete.');
+    return;
+  }
+
+  if (entry.type === 'combineCell') {
+    const arr = entry.col === 'source' ? state.sourceLines : state.targets[entry.targetIndex]?.lines;
+    if (arr) {
+      arr[entry.row] = entry.previousValue;
+      arr.splice(entry.row + 1, 0, entry.nextValue);
+      markDirty();
+    }
+    if (entry.col === 'target' && state.targets[entry.targetIndex]) state.activeTargetIndex = entry.targetIndex;
+    selection.mode = 'none';
+    renderAll();
+    selectCellNoEdit(entry.col, entry.row);
+    showToast('Undid combine cell.');
     return;
   }
 
@@ -660,8 +731,12 @@ function showContextMenu(x, y) {
   // setting .disabled on it threw, aborting before menu.hidden = false ran).
   menu.querySelector('[data-ctx="deleteTargetCell"]')?.toggleAttribute('disabled', !hasTarget);
   menu.querySelector('[data-ctx="deleteRow"]')?.toggleAttribute('disabled', !hasTarget);
+  menu.querySelector('[data-ctx="combineSourceCell"]')?.toggleAttribute(
+    'disabled', contextMenuRow + 1 >= state.sourceLines.length);
+  menu.querySelector('[data-ctx="combineTargetCell"]')?.toggleAttribute(
+    'disabled', !hasTarget || contextMenuRow + 1 >= activeTarget().lines.length);
   // Keep the menu on-screen even if the click was near an edge.
-  const menuWidth = 300, menuHeight = 180;
+  const menuWidth = 300, menuHeight = 260;
   const left = Math.min(x, window.innerWidth - menuWidth - 8);
   const top = Math.min(y, window.innerHeight - menuHeight - 8);
   menu.style.left = Math.max(4, left) + 'px';
@@ -690,6 +765,8 @@ document.querySelectorAll('#cellContextMenu [data-ctx]').forEach((btn) => {
       case 'deleteSourceCell': deleteCell('source', row); break;
       case 'deleteTargetCell': deleteCell('target', row); break;
       case 'deleteRow': deleteRow(row); break;
+      case 'combineSourceCell': combineCellWithNext('source', row); break;
+      case 'combineTargetCell': combineCellWithNext('target', row); break;
       case 'quoteInsertMode': startQuoteInsertMode(row); break;
     }
   });
@@ -819,7 +896,7 @@ document.addEventListener('mousedown', (e) => {
 // `selection` still points at whatever grid cell/row was selected before
 // the panel opened) also deletes that row in the grid.
 function isInsideOwnUiPanel(el) {
-  return !!(el && el.closest && el.closest('#findReplacePanel, #modalOverlay, #savedSearchesOverlay, #unsavedChangesOverlay, #overwriteWarningOverlay, #cellContextMenu'));
+  return !!(el && el.closest && el.closest('#findReplacePanel, #modalOverlay, #savedSearchesOverlay, #unsavedChangesOverlay, #overwriteWarningOverlay, #deleteTargetOverlay, #cellContextMenu'));
 }
 
 document.addEventListener('keydown', (e) => {
@@ -921,6 +998,7 @@ async function runMenuAction(action) {
       case 'saveAsComparisonJson': await saveAsComparisonJson(); break;
       case 'saveAsCsv': await saveAsCsv(); break;
       case 'exit': await exitApp(); break;
+      case 'undo': performUndo(); break;
       case 'openFontSettings': openFontModal(); break;
       case 'openFindReplace': openFindReplacePanel(); break;
       case 'openSavedSearches': openSavedSearchesModal(); break;
@@ -950,7 +1028,7 @@ function dirNameOf(path) { return path.replace(/[\\/][^\\/]*$/, ''); }
 function sepFor(path) { return path.includes('\\') ? '\\' : '/'; }
 
 async function importSource() {
-  const res = await callHost('chooseOpenFile', {
+  const res = await chooseOpenFile({
     title: 'Import Source',
     filters: [{ name: 'Text files', extensions: ['txt'] }, { name: 'All files', extensions: ['*'] }],
   });
@@ -973,7 +1051,7 @@ async function importSource() {
 }
 
 async function importTarget() {
-  const res = await callHost('chooseOpenFile', {
+  const res = await chooseOpenFile({
     title: 'Import Target',
     filters: [{ name: 'Text files', extensions: ['txt'] }, { name: 'All files', extensions: ['*'] }],
   });
@@ -1045,6 +1123,71 @@ function refreshDynamicColumnMenus() {
       btn.addEventListener('click', () => { closeAllMenus(); breakColumnIntoSentences(btn.dataset.col); });
     });
   }
+  const deleteSubmenu = document.getElementById('deleteTargetSubmenu');
+  if (deleteSubmenu) {
+    deleteSubmenu.innerHTML = state.targets.length === 0
+      ? '<button disabled>No targets</button>'
+      : state.targets.map((t, i) => `<button data-target-index="${i}">${escapeHtml(t.name)}</button>`).join('');
+    deleteSubmenu.querySelectorAll('[data-target-index]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        closeAllMenus();
+        deleteTarget(parseInt(btn.dataset.targetIndex, 10));
+      });
+    });
+  }
+}
+
+// Resolves to true (delete confirmed) or false (cancelled).
+function confirmDeleteTarget(name) {
+  return new Promise((resolve) => {
+    document.getElementById('deleteTargetText').textContent =
+      `Delete the "${name}" target from this project? This only removes it from the ` +
+      `current working copy, not from disk -- Import Target can bring it back in, but any ` +
+      `unsaved changes to it will be lost.`;
+    document.getElementById('deleteTargetOverlay').hidden = false;
+
+    const confirmBtn = document.getElementById('deleteTargetConfirmBtn');
+    const cancelBtn = document.getElementById('deleteTargetCancelBtn');
+
+    const cleanup = () => {
+      document.getElementById('deleteTargetOverlay').hidden = true;
+      confirmBtn.removeEventListener('click', onConfirm);
+      cancelBtn.removeEventListener('click', onCancel);
+    };
+    const onConfirm = () => { cleanup(); resolve(true); };
+    const onCancel = () => { cleanup(); resolve(false); };
+
+    confirmBtn.addEventListener('click', onConfirm);
+    cancelBtn.addEventListener('click', onCancel);
+  });
+}
+
+// Removes a target entirely (its whole column, all rows) so it can be
+// re-imported from scratch -- e.g. starting that translator's work over.
+// Distinct from deleteRow/deleteCell: those remove one row across the
+// columns they're told to; this removes one whole column.
+async function deleteTarget(index) {
+  const t = state.targets[index];
+  if (!t) return;
+  commitEditIfAny();
+  const confirmed = await confirmDeleteTarget(t.name);
+  if (!confirmed) return;
+
+  const wasActive = state.activeTargetIndex;
+  state.targets.splice(index, 1);
+  if (state.targets.length === 0) state.activeTargetIndex = -1;
+  else if (wasActive === index) state.activeTargetIndex = Math.min(index, state.targets.length - 1);
+  else if (wasActive > index) state.activeTargetIndex = wasActive - 1;
+  else state.activeTargetIndex = wasActive;
+
+  // The undo stack can hold entries tagged with target indices that no
+  // longer point at the right column (or any column) once one's removed --
+  // same reasoning as New Project/Open Project clearing it wholesale.
+  undoStack.length = 0;
+  markDirty();
+  selection.mode = 'none';
+  renderAll();
+  showToast(`Deleted target "${t.name}".`);
 }
 
 /* ---- regex construction ---- */
@@ -1273,11 +1416,31 @@ function refreshFindHistoryDatalist() {
   if (dl) dl.innerHTML = frSettings.history.map((h) => `<option value="${escapeHtml(h.find)}">`).join('');
 }
 
+// A pinned search's scope: which of Source / Target(s) "Run" applies it to.
+// Missing entirely on searches saved before scope existed -- those default
+// to both, matching the "always ran on Source + every Target" behavior they
+// were saved under.
+function scopeOf(pinned) {
+  return pinned.scope
+    ? { source: !!pinned.scope.source, targets: !!pinned.scope.targets }
+    : { source: true, targets: true };
+}
+
+// Default scope for a *newly* pinned search: since Source and Targets are
+// usually different languages, a search almost always belongs to just one
+// side -- whichever column it was actually run against when pinned. Still
+// just a starting point; either checkbox can be toggled after the fact.
+function defaultScopeForColumn(colValue) {
+  return colValue === 'source' ? { source: true, targets: false } : { source: false, targets: true };
+}
+
 // Keyed by "Find what" text -- re-using the same Find text updates (not
 // duplicates) its remembered Replace/flag pairing and moves it to the front,
 // which is the "remember which ones went together" behavior that was asked
 // for. Also records into `pinned` (deduped the same way) when the "Add to
-// Edit menu" box is checked at the time of the search.
+// Edit menu" box is checked at the time of the search -- preserving that
+// entry's existing scope if it's an update, rather than resetting it back to
+// a fresh default on every re-run.
 function recordSearchHistory(opts) {
   if (!opts.find) return;
   frSettings.history = frSettings.history.filter((h) => h.find !== opts.find);
@@ -1287,8 +1450,10 @@ function recordSearchHistory(opts) {
 
   const pinCheckbox = document.getElementById('frPin');
   if (pinCheckbox && pinCheckbox.checked) {
+    const existing = frSettings.pinned.find((p) => p.find === opts.find);
+    const scope = existing ? scopeOf(existing) : defaultScopeForColumn(document.getElementById('frColumn').value);
     frSettings.pinned = frSettings.pinned.filter((p) => p.find !== opts.find);
-    frSettings.pinned.unshift({ ...opts });
+    frSettings.pinned.unshift({ ...opts, scope });
   }
   saveFindReplaceSettings();
 }
@@ -1352,22 +1517,38 @@ function renderSavedSearchesList() {
     list.innerHTML = '<p>No saved searches yet. Check "Add to Edit menu" in Find/Replace to save one.</p>';
     return;
   }
-  list.innerHTML = frSettings.pinned.map((p, i) => `
+  list.innerHTML = frSettings.pinned.map((p, i) => {
+    const scope = scopeOf(p);
+    return `
     <div class="saved-search-row">
       <div class="saved-search-desc">Find: <code>${escapeHtml(p.find)}</code> &rarr; Replace: <code>${escapeHtml(p.replace)}</code>
         ${p.isRegex ? '<span class="tag">regex</span>' : ''}${p.caseSensitive ? '<span class="tag">case</span>' : ''}${p.wholeWord ? '<span class="tag">word</span>' : ''}
       </div>
-      <button data-run="${i}">Run on Source + all Targets</button>
+      <label class="saved-search-scope"><input type="checkbox" data-scope-source="${i}" ${scope.source ? 'checked' : ''}> Source</label>
+      <label class="saved-search-scope"><input type="checkbox" data-scope-targets="${i}" ${scope.targets ? 'checked' : ''}> Target(s)</label>
+      <button data-run="${i}">Run</button>
       <button data-edit="${i}">Edit&hellip;</button>
       <button class="unpin" data-unpin="${i}" title="Remove">&times;</button>
-    </div>`).join('');
-  list.querySelectorAll('[data-run]').forEach((btn) => btn.addEventListener('click', () => runPinnedSearchEverywhere(parseInt(btn.dataset.run, 10))));
+    </div>`;
+  }).join('');
+  list.querySelectorAll('[data-scope-source]').forEach((cb) => cb.addEventListener('change', () =>
+    setPinnedScope(parseInt(cb.dataset.scopeSource, 10), { source: cb.checked })));
+  list.querySelectorAll('[data-scope-targets]').forEach((cb) => cb.addEventListener('change', () =>
+    setPinnedScope(parseInt(cb.dataset.scopeTargets, 10), { targets: cb.checked })));
+  list.querySelectorAll('[data-run]').forEach((btn) => btn.addEventListener('click', () => runPinnedSearch(parseInt(btn.dataset.run, 10))));
   list.querySelectorAll('[data-edit]').forEach((btn) => btn.addEventListener('click', () => editSavedSearch(parseInt(btn.dataset.edit, 10))));
   list.querySelectorAll('[data-unpin]').forEach((btn) => btn.addEventListener('click', () => {
     frSettings.pinned.splice(parseInt(btn.dataset.unpin, 10), 1);
     saveFindReplaceSettings();
     renderSavedSearchesList();
   }));
+}
+
+function setPinnedScope(index, patch) {
+  const p = frSettings.pinned[index];
+  if (!p) return;
+  p.scope = { ...scopeOf(p), ...patch };
+  saveFindReplaceSettings();
 }
 
 // Loads a pinned search into the actual Find/Replace panel (rather than
@@ -1379,10 +1560,11 @@ function renderSavedSearchesList() {
 // the Find text itself is changed, which creates a new pinned entry instead
 // (matching how Find-what history already works) and leaves the original
 // one to be removed manually with its own × if it's no longer wanted.
-function editSavedSearch(index) {
-  const p = frSettings.pinned[index];
-  if (!p) return;
-  closeSavedSearchesModal();
+// Shared by Edit... and Run: loads a pinned search's Find/Replace/flags into
+// the actual Find/Replace panel and leaves "Add to Edit menu" checked, so
+// running Find Next/Replace/Replace All from there updates this same pinned
+// entry in place (recordSearchHistory dedupes pinned entries by Find text).
+function loadPinnedIntoFindReplace(p) {
   openFindReplacePanel();
   document.getElementById('frFind').value = p.find;
   document.getElementById('frReplace').value = p.replace;
@@ -1394,43 +1576,43 @@ function editSavedSearch(index) {
   document.getElementById('frMatchInfo').textContent = '';
 }
 
-// The whole point of pinning: re-run one known fix (e.g. stripping a
-// mis-inserted character) across Source and every Target in one click,
-// rather than repeating it per-column through the Find/Replace panel.
-function runPinnedSearchEverywhere(index) {
+function editSavedSearch(index) {
   const p = frSettings.pinned[index];
   if (!p) return;
-  let regex;
-  try { regex = buildSearchRegex(p); } catch (err) { showToast(err.message, true); return; }
-
-  const results = [];
-  const changes = [];
-  const applyTo = (arr, label, col, targetIndex) => {
-    let total = 0;
-    for (let i = 0; i < arr.length; i++) {
-      let count = 0;
-      regex.lastIndex = 0;
-      const newText = arr[i].replace(regex, (...m) => { count++; return substituteReplacement(p.replace, m); });
-      if (count > 0) {
-        changes.push({ col, targetIndex, row: i, previousValue: arr[i] });
-        arr[i] = newText;
-        total += count;
-      }
-    }
-    if (total > 0) results.push(`${label} (${total})`);
-  };
-
-  applyTo(state.sourceLines, 'Source', 'source', -1);
-  state.targets.forEach((t, idx) => applyTo(t.lines, t.name, 'target', idx));
-
-  if (changes.length > 0) {
-    pushUndo({ type: 'bulkTextEdit', changes });
-    markDirty();
-  }
-  findState = null;
-  renderAll();
   closeSavedSearchesModal();
-  showToast(results.length ? `Replaced: ${results.join(', ')}` : 'No matches found anywhere.');
+  loadPinnedIntoFindReplace(p);
+}
+
+// Deliberately does NOT replace every match unattended -- a saved search's
+// Find text doesn't always need changing at every occurrence it matches, so
+// this hands off to the Find/Replace panel (pre-loaded, starting on the
+// first column its Source/Target(s) checkboxes cover) where each occurrence
+// can be approved (Replace), skipped (Find Next), or bulk-applied (Replace
+// All) -- the user's actual call, not an automatic one.
+function runPinnedSearch(index) {
+  const p = frSettings.pinned[index];
+  if (!p) return;
+  const scope = scopeOf(p);
+  if (!scope.source && !scope.targets) {
+    showToast('Check Source and/or Target(s) first to run this search.', true);
+    return;
+  }
+  closeSavedSearchesModal();
+  loadPinnedIntoFindReplace(p);
+
+  const startCol = scope.source ? 'source' : (state.targets.length > 0 ? 'target:0' : null);
+  const frColumn = document.getElementById('frColumn');
+  if (startCol && [...frColumn.options].some((o) => o.value === startCol) && frColumn.value !== startCol) {
+    frColumn.value = startCol;
+    findState = null;
+    document.getElementById('frMatchInfo').textContent = '';
+  }
+
+  if (scope.source && scope.targets) {
+    showToast('Loaded into Find/Replace, starting on Source -- use the Column dropdown to move to each Target too.');
+  } else if (scope.targets && state.targets.length > 1) {
+    showToast(`Loaded into Find/Replace, starting on "${state.targets[0].name}" -- use the Column dropdown to move between targets.`);
+  }
 }
 
 document.getElementById('savedSearchesCloseBtn').addEventListener('click', closeSavedSearchesModal);
@@ -1564,6 +1746,13 @@ function loadProjectData(data) {
     state.fonts.info = { ...state.fonts.info, ...data.fonts.info };
     state.fonts.source = { ...state.fonts.source, ...data.fonts.source };
     state.fonts.target = { ...state.fonts.target, ...data.fonts.target };
+    for (const col of ['info', 'source', 'target']) {
+      // A project saved before this fix stored the full old CSS stack
+      // (e.g. `"Nirmala UI", sans-serif`) as the family -- normalize it back
+      // to a plain name so it displays correctly in the font modal and
+      // doesn't double up into a broken stack via cssFontStack().
+      state.fonts[col].family = sanitizeFontFamily(state.fonts[col].family) || DEFAULT_FONTS[col].family;
+    }
   }
   applyFontsToCss();
 }
@@ -1583,6 +1772,57 @@ function suggestedExportPath(ext) {
   const base = state.projectPath || state.sourceFilePath || (state.targets[0] && state.targets[0].filePath) || null;
   if (!base) return '';
   return `${dirNameOf(base)}${sepFor(base)}${baseNameNoExt(base)}.${ext}`;
+}
+
+/* ---- Last browsed folder ----
+ *
+ * Source, Target(s), and the project file for one piece of work are usually
+ * siblings in the same folder, so every open/save dialog remembers the
+ * folder the last dialog actually resolved to (persisted to disk, so it's
+ * still there on the next launch too) and starts there next time -- unless
+ * that specific dialog already has a more relevant default (e.g. Save
+ * defaults next to the currently open project). See chooseOpenFile/
+ * chooseSaveFile below, which every dialog call goes through instead of
+ * calling callHost directly. */
+
+let lastBrowsedFolder = null;
+let lastFolderPath = null;
+
+async function loadLastBrowsedFolder() {
+  try {
+    const { path } = await callHost('getLastFolderPath', {});
+    lastFolderPath = path;
+    const { exists } = await callHost('fileExists', { path });
+    if (exists) {
+      const { text } = await callHost('readTextFile', { path });
+      const data = JSON.parse(text);
+      if (typeof data.folder === 'string') lastBrowsedFolder = data.folder;
+    }
+  } catch (err) {
+    console.error('Failed to load last browsed folder', err);
+  }
+}
+
+function rememberBrowsedFolder(path) {
+  if (!path) return;
+  lastBrowsedFolder = dirNameOf(path);
+  if (!lastFolderPath) return;
+  callHost('writeTextFile', { path: lastFolderPath, text: JSON.stringify({ folder: lastBrowsedFolder }) })
+    .catch((err) => console.error('Failed to save last browsed folder', err));
+}
+
+async function chooseOpenFile(opts) {
+  const defaultPath = opts.defaultPath || lastBrowsedFolder || '';
+  const res = await callHost('chooseOpenFile', { ...opts, defaultPath });
+  if (res.path) rememberBrowsedFolder(res.path);
+  return res;
+}
+
+async function chooseSaveFile(opts) {
+  const defaultPath = opts.defaultPath || lastBrowsedFolder || '';
+  const res = await callHost('chooseSaveFile', { ...opts, defaultPath });
+  if (res.path) rememberBrowsedFolder(res.path);
+  return res;
 }
 
 /* ---- Recent Projects ---- */
@@ -1740,7 +1980,7 @@ async function exitApp() {
 }
 
 async function openProject() {
-  const res = await callHost('chooseOpenFile', {
+  const res = await chooseOpenFile({
     title: 'Open Project',
     filters: [{ name: 'ParallelizeTexts Project', extensions: ['paraproj'] }],
   });
@@ -1785,7 +2025,7 @@ async function saveProject(forceDialog) {
   // project currently is/would be, so the user can redirect it elsewhere.
   let path = (!forceDialog) ? state.projectPath : null;
   if (!path) {
-    const res = await callHost('chooseSaveFile', {
+    const res = await chooseSaveFile({
       title: 'Save Project',
       defaultPath: state.projectPath || suggestedProjectPath(),
       filters: [{ name: 'ParallelizeTexts Project', extensions: ['paraproj'] }],
@@ -1827,7 +2067,7 @@ function exportProjectPayload() {
 }
 
 async function saveAsComparisonJson() {
-  const res = await callHost('chooseSaveFile', {
+  const res = await chooseSaveFile({
     title: 'Save Comparison JSON',
     defaultPath: suggestedExportPath('json'),
     filters: [{ name: 'JSON', extensions: ['json'] }],
@@ -1838,7 +2078,7 @@ async function saveAsComparisonJson() {
 }
 
 async function saveAsCsv() {
-  const res = await callHost('chooseSaveFile', {
+  const res = await chooseSaveFile({
     title: 'Save CSV',
     defaultPath: suggestedExportPath('csv'),
     filters: [{ name: 'CSV', extensions: ['csv'] }],
@@ -1854,11 +2094,11 @@ async function saveAsCsv() {
 
 function applyFontsToCss() {
   const root = document.documentElement.style;
-  root.setProperty('--info-font-family', state.fonts.info.family);
+  root.setProperty('--info-font-family', cssFontStack('info', state.fonts.info.family));
   root.setProperty('--info-font-size', state.fonts.info.size + 'px');
-  root.setProperty('--source-font-family', state.fonts.source.family);
+  root.setProperty('--source-font-family', cssFontStack('source', state.fonts.source.family));
   root.setProperty('--source-font-size', state.fonts.source.size + 'px');
-  root.setProperty('--target-font-family', state.fonts.target.family);
+  root.setProperty('--target-font-family', cssFontStack('target', state.fonts.target.family));
   root.setProperty('--target-font-size', state.fonts.target.size + 'px');
 }
 
@@ -1995,6 +2235,7 @@ async function init() {
   }
   await loadFindReplaceSettings();
   await loadRecentProjects();
+  await loadLastBrowsedFolder();
   refreshDynamicColumnMenus();
   refreshRecentProjectsMenu();
 

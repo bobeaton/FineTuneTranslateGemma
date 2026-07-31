@@ -64,16 +64,28 @@ public static class RpcRouter
                 if (!string.IsNullOrEmpty(defaultPath))
                 {
                     string fullPath = Path.GetFullPath(defaultPath);
-                    string? dir = Path.GetDirectoryName(fullPath);
-                    if (dir != null && Directory.Exists(dir) && !File.Exists(fullPath))
+                    if (Directory.Exists(fullPath))
                     {
-                        File.WriteAllText(fullPath, "");
-                        placeholderCreated = fullPath;
+                        // defaultPath is a bare folder (e.g. "start in the last
+                        // browsed folder" with no specific file suggested) --
+                        // that's a valid starting directory for Photino as-is,
+                        // no filename to preserve, so skip the placeholder
+                        // workaround below (which exists only for that case).
                         defaultPath = fullPath;
                     }
-                    else if (dir == null || !Directory.Exists(dir))
+                    else
                     {
-                        defaultPath = "";
+                        string? dir = Path.GetDirectoryName(fullPath);
+                        if (dir != null && Directory.Exists(dir) && !File.Exists(fullPath))
+                        {
+                            File.WriteAllText(fullPath, "");
+                            placeholderCreated = fullPath;
+                            defaultPath = fullPath;
+                        }
+                        else if (dir == null || !Directory.Exists(dir))
+                        {
+                            defaultPath = "";
+                        }
                     }
                 }
 
@@ -162,6 +174,12 @@ public static class RpcRouter
                 string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ParallelizeTexts");
                 Directory.CreateDirectory(dir);
                 return new { path = Path.Combine(dir, "recent-projects.json") };
+            }
+            case "getLastFolderPath":
+            {
+                string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ParallelizeTexts");
+                Directory.CreateDirectory(dir);
+                return new { path = Path.Combine(dir, "last-folder.json") };
             }
             case "exit":
             {

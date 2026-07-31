@@ -316,6 +316,12 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 18%, transpare
 
 .modal h2 { margin-top: 0; font-size: 16px; }
 
+.font-hint {
+  margin: -6px 0 14px;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
 .font-row {
   display: grid;
   grid-template-columns: 110px 1fr 70px;
@@ -483,6 +489,15 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 18%, transpare
   color: var(--accent-fg);
   font-size: 10px;
   vertical-align: middle;
+}
+
+.saved-search-scope {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
 }
 
 .saved-search-row button {

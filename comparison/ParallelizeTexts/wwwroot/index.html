@@ -30,6 +30,10 @@
       <div class="menu-sep"></div>
       <button data-action="importSource">Import Source&hellip;</button>
       <button data-action="importTarget">Import Target&hellip;</button>
+      <div class="menu-submenu-parent">
+        <button class="menu-submenu-label">Delete Target</button>
+        <div class="menu-submenu" id="deleteTargetSubmenu"></div>
+      </div>
       <div class="menu-sep"></div>
       <button data-action="exit">Exit</button>
     </div>
@@ -37,6 +41,8 @@
   <div class="menu">
     <button class="menu-btn" data-menu="edit">Edit</button>
     <div class="menu-dropdown" data-menu-panel="edit">
+      <button data-action="undo">Undo<span class="menu-shortcut">Ctrl+Z</span></button>
+      <div class="menu-sep"></div>
       <button data-action="openFindReplace">Find/Replace&hellip;</button>
       <button data-action="openSavedSearches">Saved Searches&hellip;</button>
       <div class="menu-sep"></div>
@@ -78,6 +84,9 @@
   <button data-ctx="deleteSourceCell">Delete Source cell</button>
   <button data-ctx="deleteTargetCell">Delete Target cell</button>
   <button data-ctx="deleteRow">Delete row (both)</button>
+  <div class="menu-sep"></div>
+  <button data-ctx="combineSourceCell">Combine Source cell with next</button>
+  <button data-ctx="combineTargetCell">Combine Target cell with next</button>
 </div>
 
 <div id="statusbar">
@@ -87,19 +96,20 @@
 <div id="modalOverlay" class="modal-overlay" hidden>
   <div id="fontModal" class="modal">
     <h2>Column Fonts</h2>
+    <p class="font-hint">Just the font name (e.g. "Nirmala UI") -- a fallback is added automatically.</p>
     <div class="font-row" data-col="info">
       <label>Info column</label>
-      <input type="text" class="font-family" list="fontSuggestions" />
+      <input type="text" class="font-family" list="fontSuggestions" placeholder="Consolas" />
       <input type="number" class="font-size" min="6" max="72" />
     </div>
     <div class="font-row" data-col="source">
       <label>Source column</label>
-      <input type="text" class="font-family" list="fontSuggestions" />
+      <input type="text" class="font-family" list="fontSuggestions" placeholder="Nirmala UI" />
       <input type="number" class="font-size" min="6" max="72" />
     </div>
     <div class="font-row" data-col="target">
       <label>Target column</label>
-      <input type="text" class="font-family" list="fontSuggestions" />
+      <input type="text" class="font-family" list="fontSuggestions" placeholder="Nirmala UI" />
       <input type="number" class="font-size" min="6" max="72" />
     </div>
     <datalist id="fontSuggestions">
@@ -183,6 +193,17 @@
       <button id="overwriteOverwriteBtn">Overwrite</button>
       <button id="overwriteSaveAsBtn">Save As&hellip;</button>
       <button id="overwriteCancelBtn">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div id="deleteTargetOverlay" class="modal-overlay" hidden>
+  <div class="modal" id="deleteTargetModal">
+    <h2>Delete Target</h2>
+    <p id="deleteTargetText"></p>
+    <div class="modal-buttons">
+      <button id="deleteTargetConfirmBtn">Delete</button>
+      <button id="deleteTargetCancelBtn">Cancel</button>
     </div>
   </div>
 </div>

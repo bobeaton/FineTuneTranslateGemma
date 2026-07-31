@@ -28,6 +28,40 @@ dotnet build -c Release
 .\bin\Release\net9.0\ParallelizeTexts.exe
 ```
 
+## Sending this to someone else to run
+
+To have someone else run this on their own Windows machine, with nothing to
+install first (no .NET SDK/runtime, no `dotnet` on their PATH), publish a
+self-contained single-file build:
+
+```powershell
+cd comparison\ParallelizeTexts
+dotnet publish -c Release -r win-x64 --self-contained true `
+    -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
+    -p:EnableCompressionInSingleFile=true
+```
+
+This produces `bin\Release\net9.0\win-x64\publish\`, containing
+`ParallelizeTexts.exe` (~35 MB -- the whole .NET runtime plus every managed
+dependency bundled in) and a `wwwroot\` folder next to it. `wwwroot` has to
+stay a sibling of the exe (it's loaded by relative path at startup, same as
+in `dotnet run`) -- delete the `.pdb` if present (debug symbols only, not
+needed to run) and zip the `publish` folder itself, so unzipping on their
+end keeps the exe and `wwwroot` together. They:
+
+1. Unzip it anywhere and double-click `ParallelizeTexts.exe`.
+2. Use **File > Import Source...** / **Import Target...** to load whatever
+   `.txt` file(s) you sent them, or **File > Open Project...** if you sent a
+   `.paraproj` instead.
+3. Do the alignment work, then **File > Save As > Comparison JSON...** (or
+   CSV, or **Save**/**Save As > Project...** to send a `.paraproj` back for
+   further editing) and send that file back to you.
+
+If the window fails to open on their machine (rare -- most Windows 10/11
+installs already have it via Edge), they need the free
+[WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)
+from Microsoft; Photino renders through it.
+
 ## File menu
 
 In menu order (Project-related items first, Import below the separator;
@@ -74,11 +108,29 @@ items with a `▸` at the right edge open a sub-dropdown):
   column. Re-importing a file with a name that matches an already-imported
   target **replaces** that target's lines in place; a new name is appended as
   a new tab (see "Multiple targets" below).
+- **Delete Target ▸** -- lists every imported target by name; picking one
+  asks for confirmation, then removes that whole column (all its rows) from
+  the current working copy so you can re-import and start it over. This
+  doesn't touch anything on disk -- Import Target can always bring it back
+  in -- but any unsaved edits made to it are lost, and it clears the undo
+  stack (an undo entry tagged for a target that just got removed, or that
+  shifted to a different index, can't be replayed correctly).
 - **Exit** -- same unsaved-changes prompt as New Project, then closes the
   app (only after a real Save completes, or you choose Don't Save).
 - Both `Import` and both text-based `Save As` targets are trimmed and
   blank-line-filtered exactly like `BuildComparisonJson` does, so a stray
   blank line never becomes an empty row.
+
+### Remembering the last folder browsed
+
+Every Open/Save dialog (Open Project, Import Source, Import Target, Save As
+Project/Comparison JSON/CSV) starts in whichever folder the *last* dialog of
+any kind actually resolved to -- handy since a Source file and its Target(s)
+are usually siblings in one folder, so picking the Source once means Import
+Target already starts in the right place. A dialog that already has a more
+specific default (e.g. Save defaulting next to the currently-open project)
+uses that instead. Persists across launches in
+`%APPDATA%\ParallelizeTexts\last-folder.json`.
 
 ### Unsaved changes (New Project, Exit)
 
@@ -202,12 +254,16 @@ because a plain click always starts *editing* text (so Delete there means
   Escape needed) -- **Delete** there removes both the Source and Target cell
   at that row and shifts both columns up.
 
-Both kinds of Delete can be undone with **Ctrl+Z** (Cmd+Z on macOS), which
-re-inserts the removed text at the same row -- restoring the correct target
-column even if you've switched tabs since deleting. Undo only covers these
-Delete-triggered removals (not general typing), and its history is cleared
-whenever you Import/Open something new. While a cell is actively being
-edited, Ctrl+Z is left alone to do the browser's normal undo-typing instead.
+Both kinds of Delete can be undone with **Ctrl+Z** (Cmd+Z on macOS) or
+**Edit > Undo**, which re-inserts the removed text at the same row --
+restoring the correct target column even if you've switched tabs since
+deleting. Undo only covers these Delete-triggered removals (not general
+typing), and its history is cleared whenever you Import/Open something new
+or delete a whole target. While a cell is actively being edited, Ctrl+Z is
+left alone to do the browser's normal undo-typing instead -- **Edit > Undo**
+always runs this app's own undo (committing whatever's being typed first),
+since clicking a menu item isn't the same "let the browser handle it" case
+the keyboard shortcut is carved out for.
 
 ### Target row-count warning
 
@@ -260,19 +316,36 @@ History and pinned searches persist across launches in
 
 ### Saved Searches
 
-Lists every pinned search with a **Run on Source + all Targets** button --
-built for exactly the "this AI draft keeps inserting a stray character"
-case: pin the fix once, then re-apply it everywhere (Source and every
-target's lines) in a single click from then on, instead of repeating it
-per-column through the Find/Replace panel. Each row also has an **Edit...**
-button, which loads that search back into the Find/Replace panel (Find,
-Replace, and all its checkboxes, with "Add to Edit menu" left checked) so
-you can tweak it -- or try it with Find Next first -- rather than un-pinning
-and re-creating it from scratch. Running Find Next/Replace/Replace All from
-there updates this same pinned entry in place, unless the *Find* text itself
-is changed, which creates a new pinned entry instead (pinned/history entries
-are both keyed by Find text) and leaves the original one for its own `×` if
-it's no longer wanted. Each row also has a `×` to unpin it directly.
+Lists every pinned search, each with **Source** / **Target(s)** checkboxes
+and a **Run** button. Since Source and Target(s) are usually different
+languages, a given search is generally only meaningful for one side or the
+other, so a newly-pinned search defaults to just whichever column it was
+run against at the time -- Source alone, or all Target(s) together -- and
+you can check the other box too (or switch which is checked) at any time;
+that choice is remembered per search.
+
+**Run** does *not* silently replace every match -- a saved search's Find
+text doesn't always need changing at every occurrence it happens to match.
+Instead it loads the search into the Find/Replace panel (same as
+**Edit...**, below) starting on the first column its checkboxes cover, so
+you step through it there: **Find Next** to skip an occurrence, **Replace**
+to approve just that one, or **Replace All** to apply it to the whole
+column in one pass -- your call per occurrence, or per column. If both
+Source and Target(s) are checked (or there's more than one target), a toast
+says so and you switch columns yourself with Find/Replace's **Column**
+dropdown once you're done with the current one.
+
+Each row also has an **Edit...** button, which loads that search back into
+the Find/Replace panel (Find, Replace, and all its checkboxes, with "Add to
+Edit menu" left checked) so you can tweak it first -- rather than
+un-pinning and re-creating it from scratch; unlike **Run**, it leaves
+**Column** wherever it already was. Running Find Next/Replace/Replace All
+from the panel (whether opened via **Run** or **Edit...**) updates this
+same pinned entry in place (scope included) unless the *Find* text itself
+is changed, which creates a new pinned entry instead (pinned/history
+entries are both keyed by Find text) and leaves the original one for its
+own `×` if it's no longer wanted. Each row also has a `×` to unpin it
+directly.
 
 ### Break into Sentences
 
@@ -302,6 +375,11 @@ gutter -- all equivalent) for a context menu:
   Delete on that column, without leaving edit mode first.
 - **Delete row (both)** -- same as clicking the row-number gutter then
   Delete.
+- **Combine Source cell with next** / **Combine Target cell with next** --
+  merges that column's cell in the row below into the clicked row (joined
+  with a single space), then removes the now-emptied row below it, shifting
+  every later row up one. Only affects that one column -- the other column's
+  rows are untouched. Disabled if there's no next row in that column.
 - **Click to insert quotes (Left)/Commas (Right)...** -- a mode for placing
   quote marks and commas at a specific spot. After choosing it, in a Source
   or Target cell **in that same row**: **left-click** inserts a smart quote
@@ -331,6 +409,13 @@ Set an independent font family + size for the Info, Source, and Target
 columns (a `<datalist>` suggests a few Devanagari-friendly fonts -- Nirmala
 UI, Noto Sans Devanagari, Mangal, Aparajita -- but any font name your system
 has is fine). Takes effect immediately and is saved with the project.
+
+Each font field takes just the plain font name (e.g. `Nirmala UI`, no quotes
+or fallback keyword) -- a generic fallback (`sans-serif` for Source/Target,
+`monospace` for Info) is appended automatically, so there's no CSS syntax to
+get right by hand. Projects saved by an earlier version (which stored the
+full CSS value, quotes and all) still load correctly -- it's normalized back
+to a plain name the first time such a project is opened.
 
 ## Startup: last project auto-loads
 
