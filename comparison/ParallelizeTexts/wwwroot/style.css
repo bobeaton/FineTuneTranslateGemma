@@ -271,8 +271,8 @@ body {
    specified width unaccounted for and dumped as a blank gap right after it.
    The flex layout has to live on an inner wrapper div instead, so the <td>
    itself stays a plain table-cell. */
-.info-cell-inner { display: flex; align-items: center; justify-content: center; gap: 4px; }
-.info-lines { text-align: center; }
+.info-cell-inner { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
+.info-lines { flex: 1; text-align: center; }
 .col-source { font-family: var(--source-font-family); font-size: var(--source-font-size); }
 .col-target { font-family: var(--target-font-family); font-size: var(--target-font-size); }
 
