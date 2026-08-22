@@ -130,11 +130,27 @@ function countSentenceCommaQuote(text) {
   return { sentences, commas, quotes };
 }
 
+// Wraps a count in a bold/underlined span when it's the dimension that
+// differs between Source and Target, so line2 draws the eye straight to
+// which of sentences/commas/quotes is the mismatched one instead of making
+// the reader compare all three pairs themselves.
+function markDiff(value, differs) {
+  return differs ? `<span class="info-diff">${value}</span>` : String(value);
+}
+
 function computeInfo(srcText, tgtText) {
   const ws = countWords(srcText), wt = countWords(tgtText);
   const s = countSentenceCommaQuote(srcText), t = countSentenceCommaQuote(tgtText);
   const wordDiff = Math.abs(ws - wt) > 11;
-  const structDiff = (s.sentences !== t.sentences) || (s.commas !== t.commas) || (s.quotes !== t.quotes);
+  const sentDiff = s.sentences !== t.sentences;
+  const commaDiff = s.commas !== t.commas;
+  const quoteDiff = s.quotes !== t.quotes;
+  // Yellow ("structure differs") highlight is deliberately one-sided on
+  // commas: a Target with *fewer* commas than Source is worth flagging
+  // (likely a dropped clause/pause), but a Target with *more* commas isn't --
+  // that's usually just the target language's own punctuation conventions,
+  // not a translation problem, so it shouldn't nag the reviewer.
+  const structDiff = sentDiff || quoteDiff || (t.commas < s.commas);
   let cls = '';
   if (wordDiff && structDiff) cls = 'info-both';
   else if (wordDiff) cls = 'info-words';
@@ -145,7 +161,8 @@ function computeInfo(srcText, tgtText) {
   ].join('\n');
   return {
     line1: `${ws}:${wt}`,
-    line2: `${s.sentences}/${s.commas}/${s.quotes}:${t.sentences}/${t.commas}/${t.quotes}`,
+    line2: `${markDiff(s.sentences, sentDiff)}/${markDiff(s.commas, commaDiff)}/${markDiff(s.quotes, quoteDiff)}`
+         + `:${markDiff(t.sentences, sentDiff)}/${markDiff(t.commas, commaDiff)}/${markDiff(t.quotes, quoteDiff)}`,
     cls,
     tooltip,
   };
@@ -173,8 +190,17 @@ function renderHeader() {
   let html = '<th class="col-gutter">#</th>';
   if (t) html += '<th class="col-info">Info</th>';
   html += '<th class="col-source">Source</th>';
+  if (t) html += '<th class="col-actions"></th>';
   if (t) html += `<th class="col-target">Target: ${escapeHtml(t.name)}</th>`;
   headerRow.innerHTML = html;
+  // table-layout:fixed splits leftover space among however many columns are
+  // left without an explicit width -- with Info/Actions/Target all added at
+  // once here, that was leaving Source and Target's shares miscomputed (a
+  // large blank gap) in practice. Toggling this class lets the CSS give
+  // Source/Target an explicit, deterministic 50/50 split of the true
+  // leftover space whenever a Target column exists, instead of leaving it
+  // to that leftover-space heuristic at all.
+  document.getElementById('grid').classList.toggle('has-target', !!t);
 }
 
 function renderBody() {
@@ -192,18 +218,34 @@ function buildRowHtml(i, t) {
   const tgtText = t ? (t.lines[i] ?? '') : '';
   let out = `<tr data-row="${i}">`;
   out += `<td class="col-gutter" data-role="gutter" data-row="${i}">${i + 1}</td>`;
-  if (t) out += buildInfoCellHtml(srcText, tgtText);
+  if (t) out += buildInfoCellHtml(i, srcText, tgtText);
   out += `<td class="cell col-source" data-col="source" data-row="${i}">${escapeHtml(srcText)}</td>`;
+  if (t) out += buildActionsCellHtml(i, t);
   if (t) out += `<td class="cell col-target" data-col="target" data-row="${i}">${escapeHtml(tgtText)}</td>`;
   out += '</tr>';
   return out;
 }
 
-function buildInfoCellHtml(srcText, tgtText) {
-  const info = computeInfo(srcText, tgtText);
-  return `<td class="col-info ${info.cls}" data-role="info" title="${escapeHtml(info.tooltip)}">`
+// Shared by buildInfoCellHtml and updateInfoCell so the two never drift --
+// the two count lines plus a quick "delete row" shortcut (same as the
+// right-click menu's "Delete row (both)"). This column is pure computed
+// display, never contenteditable, so a button living inside it is completely
+// safe (contrast with the Source/Target action buttons below, which
+// deliberately live in their OWN column instead of inside the text cells).
+function infoCellInnerHtml(info, row) {
+  return `<div class="info-cell-inner">`
+       + `<div class="info-lines">`
        + `<span class="info-line">${info.line1}</span>`
        + `<span class="info-line">${info.line2}</span>`
+       + `</div>`
+       + `<button class="mini-btn mini-btn-delete-row" data-row="${row}" title="Delete row (both)">×</button>`
+       + `</div>`;
+}
+
+function buildInfoCellHtml(row, srcText, tgtText) {
+  const info = computeInfo(srcText, tgtText);
+  return `<td class="col-info ${info.cls}" data-role="info" title="${escapeHtml(info.tooltip)}">`
+       + infoCellInnerHtml(info, row)
        + '</td>';
 }
 
@@ -218,7 +260,43 @@ function updateInfoCell(row) {
   const info = computeInfo(srcText, tgtText);
   cell.className = `col-info ${info.cls}`;
   cell.title = info.tooltip;
-  cell.innerHTML = `<span class="info-line">${info.line1}</span><span class="info-line">${info.line2}</span>`;
+  cell.innerHTML = infoCellInnerHtml(info, row);
+}
+
+// The shared gutter column between Source and Target: a delete-cell (×) and
+// a combine-with-next-or-previous shortcut for each side, packed as two
+// narrow sub-columns (Source's hugging the left/Source edge, Target's
+// hugging the right/Target edge) so they read as "belonging to" whichever
+// text column they're next to. These are pure shortcuts to the same
+// deleteCell/combineCellWithNext/combineCellWithPrevious functions the
+// right-click menu uses -- same undo entries, same toasts, nothing
+// duplicated. Deliberately its own column rather than buttons overlaid
+// inside the Source/Target cells themselves, since those cells are
+// contenteditable and rely on being exactly one text node (see
+// buildRowHtml/syncCellToState) -- anything else living inside them risks
+// corrupting the saved text or confusing caret placement.
+function buildActionsCellHtml(row, t) {
+  const previous = combineDirection === 'previous';
+  const arrow = previous ? '↑' : '↓';
+  const direction = previous ? 'with previous' : 'with next';
+  const canCombine = (arr) => (previous ? row > 0 : row + 1 < arr.length);
+  // Tooltips spell out which column each button belongs to (e.g. "Delete
+  // Target cell") rather than a bare "Delete cell" -- since both sides sit
+  // right next to each other in this shared gutter, the column name is the
+  // only thing the tooltip has to go on to disambiguate which button you're
+  // over.
+  const combineBtn = (colLabel, col, arr) =>
+    `<button class="mini-btn mini-btn-combine" data-mini-col="${col}" data-mini-kind="combine" data-row="${row}" `
+    + `title="Combine ${colLabel} cell ${direction}" ${canCombine(arr) ? '' : 'disabled'}>${arrow}</button>`;
+  const deleteBtn = (colLabel, col) =>
+    `<button class="mini-btn mini-btn-delete" data-mini-col="${col}" data-mini-kind="delete" data-row="${row}" `
+    + `title="Delete ${colLabel} cell">×</button>`;
+  return `<td class="col-actions" data-role="actions">`
+    + `<div class="actions-cell-inner">`
+    + `<div class="cell-actions cell-actions-source">${deleteBtn('Source', 'source')}${combineBtn('Source', 'source', state.sourceLines)}</div>`
+    + `<div class="cell-actions cell-actions-target">${deleteBtn('Target', 'target')}${combineBtn('Target', 'target', t.lines)}</div>`
+    + `</div>`
+    + '</td>';
 }
 
 function renderTargetTabs() {
@@ -527,6 +605,13 @@ function combineCellWithNext(col, row) {
   selectCellNoEdit(col, Math.min(row, rowCount() - 1));
 }
 
+// Same merge, just entered from the second of the two cells -- delegates to
+// combineCellWithNext on the row above so undo/redo stays a single code path.
+function combineCellWithPrevious(col, row) {
+  if (row <= 0) return;
+  combineCellWithNext(col, row - 1);
+}
+
 // Reverses the most recent deleteCell/deleteRow, re-inserting the removed
 // text at the same index. Targets the target column by stored index (not
 // "whichever tab is active now"), so undoing still lands correctly even if
@@ -700,6 +785,10 @@ function insertCommaAtClick(cell, x, y) {
 /* ---- right-click context menu (row-scoped: cell/row delete, punctuation copy) ---- */
 
 let contextMenuRow = null;
+// Which column was actually right-clicked: 'source' or 'target' when the
+// click landed on that column's cell, null for the Info column or the
+// row-number gutter (still ambiguous, so the menu stays column-agnostic).
+let contextMenuCol = null;
 
 document.getElementById('gridContainer').addEventListener('contextmenu', (e) => {
   if (quoteInsertMode) {
@@ -719,6 +808,8 @@ document.getElementById('gridContainer').addEventListener('contextmenu', (e) => 
   e.preventDefault();
   commitEditIfAny();
   contextMenuRow = parseInt(tr.dataset.row, 10);
+  const clickedCell = e.target.closest('td.col-source, td.col-target');
+  contextMenuCol = clickedCell ? (clickedCell.classList.contains('col-source') ? 'source' : 'target') : null;
   showContextMenu(e.clientX, e.clientY);
 });
 
@@ -731,12 +822,30 @@ function showContextMenu(x, y) {
   // setting .disabled on it threw, aborting before menu.hidden = false ran).
   menu.querySelector('[data-ctx="deleteTargetCell"]')?.toggleAttribute('disabled', !hasTarget);
   menu.querySelector('[data-ctx="deleteRow"]')?.toggleAttribute('disabled', !hasTarget);
+  menu.querySelector('[data-ctx="combinePreviousSourceCell"]')?.toggleAttribute(
+    'disabled', contextMenuRow <= 0);
+  menu.querySelector('[data-ctx="combinePreviousTargetCell"]')?.toggleAttribute(
+    'disabled', !hasTarget || contextMenuRow <= 0);
   menu.querySelector('[data-ctx="combineSourceCell"]')?.toggleAttribute(
     'disabled', contextMenuRow + 1 >= state.sourceLines.length);
   menu.querySelector('[data-ctx="combineTargetCell"]')?.toggleAttribute(
     'disabled', !hasTarget || contextMenuRow + 1 >= activeTarget().lines.length);
+  // Right-clicking directly on a Source or Target cell narrows the menu to
+  // just that column's items (and drops the column name from their labels,
+  // since it's now obvious from where you clicked) -- right-clicking the
+  // Info column or the row-number gutter still shows everything, labeled
+  // with the column name, since there's no single column to infer there.
+  menu.querySelectorAll('[data-col]').forEach((btn) => {
+    if (contextMenuCol) {
+      btn.hidden = btn.dataset.col !== contextMenuCol;
+      btn.textContent = btn.dataset.labelOnly;
+    } else {
+      btn.hidden = false;
+      btn.textContent = btn.dataset.labelBoth;
+    }
+  });
   // Keep the menu on-screen even if the click was near an edge.
-  const menuWidth = 300, menuHeight = 260;
+  const menuWidth = 300, menuHeight = 320;
   const left = Math.min(x, window.innerWidth - menuWidth - 8);
   const top = Math.min(y, window.innerHeight - menuHeight - 8);
   menu.style.left = Math.max(4, left) + 'px';
@@ -747,6 +856,7 @@ function showContextMenu(x, y) {
 function hideContextMenu() {
   document.getElementById('cellContextMenu').hidden = true;
   contextMenuRow = null;
+  contextMenuCol = null;
 }
 
 document.addEventListener('click', hideContextMenu);
@@ -765,6 +875,8 @@ document.querySelectorAll('#cellContextMenu [data-ctx]').forEach((btn) => {
       case 'deleteSourceCell': deleteCell('source', row); break;
       case 'deleteTargetCell': deleteCell('target', row); break;
       case 'deleteRow': deleteRow(row); break;
+      case 'combinePreviousSourceCell': combineCellWithPrevious('source', row); break;
+      case 'combinePreviousTargetCell': combineCellWithPrevious('target', row); break;
       case 'combineSourceCell': combineCellWithNext('source', row); break;
       case 'combineTargetCell': combineCellWithNext('target', row); break;
       case 'quoteInsertMode': startQuoteInsertMode(row); break;
@@ -841,6 +953,23 @@ function insertPastedText(text) {
 const gridBody = document.getElementById('gridBody');
 
 gridBody.addEventListener('click', (e) => {
+  // Action-gutter and delete-row mini-buttons -- checked first since they're
+  // unambiguous regardless of quote-insert-mode; ending that mode here too
+  // since a delete/combine can shift or renumber rows out from under it.
+  const rowDeleteBtn = e.target.closest('.mini-btn-delete-row');
+  const miniBtn = e.target.closest('.mini-btn[data-mini-col]');
+  if (rowDeleteBtn || miniBtn) {
+    if (quoteInsertMode) stopQuoteInsertMode();
+    commitEditIfAny();
+    if (rowDeleteBtn) { deleteRow(parseInt(rowDeleteBtn.dataset.row, 10)); return; }
+    const row = parseInt(miniBtn.dataset.row, 10);
+    const col = miniBtn.dataset.miniCol;
+    if (miniBtn.dataset.miniKind === 'delete') deleteCell(col, row);
+    else if (combineDirection === 'previous') combineCellWithPrevious(col, row);
+    else combineCellWithNext(col, row);
+    return;
+  }
+
   if (quoteInsertMode) {
     const tr = e.target.closest('tr[data-row]');
     const clickedRow = tr ? parseInt(tr.dataset.row, 10) : null;
@@ -1003,6 +1132,7 @@ async function runMenuAction(action) {
       case 'openFindReplace': openFindReplacePanel(); break;
       case 'openSavedSearches': openSavedSearchesModal(); break;
       case 'breakBothIntoSentences': breakBothIntoSentences(); break;
+      case 'joinBothIntoParagraph': joinBothIntoParagraph(); break;
     }
   } catch (err) {
     const msg = String((err && err.message) || err);
@@ -1121,6 +1251,14 @@ function refreshDynamicColumnMenus() {
       + state.targets.map((t, i) => `<button data-col="target:${i}">Target: ${escapeHtml(t.name)}</button>`).join('');
     submenu.querySelectorAll('button').forEach((btn) => {
       btn.addEventListener('click', () => { closeAllMenus(); breakColumnIntoSentences(btn.dataset.col); });
+    });
+  }
+  const joinSubmenu = document.getElementById('joinParagraphSubmenu');
+  if (joinSubmenu) {
+    joinSubmenu.innerHTML = '<button data-col="source">Source</button>'
+      + state.targets.map((t, i) => `<button data-col="target:${i}">Target: ${escapeHtml(t.name)}</button>`).join('');
+    joinSubmenu.querySelectorAll('button').forEach((btn) => {
+      btn.addEventListener('click', () => { closeAllMenus(); joinColumnIntoParagraph(btn.dataset.col); });
     });
   }
   const deleteSubmenu = document.getElementById('deleteTargetSubmenu');
@@ -1621,12 +1759,15 @@ document.getElementById('savedSearchesCloseBtn').addEventListener('click', close
 
 // Splits on run(s) of sentence-ending punctuation (Latin . ! ? plus the
 // Devanagari/Arabic/Urdu/Ethiopic/CJK terminators the source texts use)
-// optionally followed by closing quote marks, keeping that punctuation with
-// the sentence it ends and trimming the start of what follows.
+// optionally followed by closing quote marks and/or a closing parenthesis
+// (e.g. a whole parenthetical paragraph ending "....)"), each of which may
+// itself be preceded by a single space (e.g. "? ”") -- that space is a
+// typesetting gap between the punctuation and its closer, not a sentence
+// break, so it's stripped along with keeping the closer on the same line.
 // Built via new RegExp(string) rather than a /regex/ literal -- a /literal/
 // silently flattened the curly closing quotes (U+2019/U+201D) below to
 // straight ones here once already; the string form round-tripped correctly.
-const SENTENCE_END_RE = new RegExp('[.!?।؟۔።｡。]+[\'"’”]*', 'g');
+const SENTENCE_END_RE = new RegExp('[.!?।؟۔።｡。]+( ?[\'"’”)])*', 'g');
 
 function splitIntoSentences(text) {
   const re = new RegExp(SENTENCE_END_RE.source, 'g');
@@ -1635,7 +1776,11 @@ function splitIntoSentences(text) {
   let m;
   while ((m = re.exec(text))) {
     const end = m.index + m[0].length;
-    sentences.push(text.slice(lastIndex, end).trim());
+    // Collapse a space that sits directly before a closing quote/paren within
+    // the matched punctuation+closer span (e.g. "? ”" -> "?”"). Only touches
+    // spaces immediately preceding a closer -- never other spaces in the text.
+    const cleanedMatch = m[0].replace(/ (?=[\'"’”)])/g, '');
+    sentences.push((text.slice(lastIndex, m.index) + cleanedMatch).trim());
     lastIndex = end;
     if (m[0].length === 0) re.lastIndex++;
   }
@@ -1718,6 +1863,61 @@ function breakBothIntoSentences() {
   const parts = [describe('Source', beforeSourceRows, sourceResult)];
   if (t) parts.push(describe(t.name, beforeTargetRows, targetResult));
   showToast(`Split into sentences: ${parts.join('; ')}`);
+}
+
+// Opposite of splitArrayIntoSentences: collapses every row of a column back
+// down to one, joined with a single space. Blank/whitespace-only rows are
+// dropped rather than leaving stray double-spaces behind, same trim-and-
+// skip-blank convention Import/Break-into-Sentences already use.
+function joinArrayIntoParagraph(arr) {
+  return arr.map((line) => (line || '').trim()).filter((line) => line.length > 0).join(' ');
+}
+
+function joinColumnIntoParagraph(colValue) {
+  const arr = getSearchArray(colValue);
+  if (!arr) { showToast('No such column.', true); return; }
+  if (arr.length <= 1) { showToast(arr.length === 0 ? 'No rows to join.' : 'Already a single row.'); return; }
+
+  const beforeSourceLen = state.sourceLines.length;
+  const beforeRowCount = arr.length;
+  const newArr = [joinArrayIntoParagraph(arr)];
+  if (colValue === 'source') {
+    state.sourceLines = newArr;
+    notifyIfTargetsDrifted(beforeSourceLen);
+  } else {
+    const idx = parseInt(colValue.slice(7), 10);
+    if (state.targets[idx]) state.targets[idx].lines = newArr;
+  }
+  markDirty();
+  selection.mode = 'none';
+  undoStack.length = 0; // row indices are wholesale renumbered; old undo entries no longer apply
+  findState = null;
+  renderAll();
+  showToast(`Joined ${beforeRowCount} rows into a single paragraph.`);
+}
+
+// Triggered by clicking the "Join into Single Paragraph" menu label itself
+// (as opposed to picking one column from its submenu) -- joins Source AND
+// the currently-active Target together in one pass.
+function joinBothIntoParagraph() {
+  const t = activeTarget();
+  const beforeSourceLen = state.sourceLines.length;
+  const beforeSourceRows = state.sourceLines.length;
+  const beforeTargetRows = t ? t.lines.length : 0;
+
+  state.sourceLines = [joinArrayIntoParagraph(state.sourceLines)];
+  if (t) t.lines = [joinArrayIntoParagraph(t.lines)];
+
+  notifyIfTargetsDrifted(beforeSourceLen); // other (non-active) targets may now mismatch the new Source length
+  markDirty();
+  selection.mode = 'none';
+  undoStack.length = 0;
+  findState = null;
+  renderAll();
+
+  const parts = [`Source ${beforeSourceRows} → 1 row`];
+  if (t) parts.push(`${t.name} ${beforeTargetRows} → 1 row`);
+  showToast(`Joined into single paragraph: ${parts.join('; ')}.`);
 }
 
 /* =========================================================================
@@ -1824,6 +2024,57 @@ async function chooseSaveFile(opts) {
   if (res.path) rememberBrowsedFolder(res.path);
   return res;
 }
+
+/* ---- Combine Direction (per-machine preference, not saved in the project) ----
+ *
+ * Which way the action-gutter's quick combine button merges a cell -- with
+ * the row below (Next) or above (Previous). Different people working on the
+ * same project can have opposite habits here, so like the last-browsed-
+ * folder this is persisted per-machine (%APPDATA%), not saved into the
+ * project file itself -- opening someone else's project shouldn't flip your
+ * own preference, and vice versa. */
+
+let combineDirection = 'next'; // 'next' | 'previous'
+let combineDirectionPath = null;
+
+async function loadCombineDirection() {
+  try {
+    const { path } = await callHost('getCombineDirectionPath', {});
+    combineDirectionPath = path;
+    const { exists } = await callHost('fileExists', { path });
+    if (exists) {
+      const { text } = await callHost('readTextFile', { path });
+      const data = JSON.parse(text);
+      if (data.direction === 'next' || data.direction === 'previous') combineDirection = data.direction;
+    }
+  } catch (err) {
+    console.error('Failed to load combine direction setting', err);
+  }
+}
+
+function setCombineDirection(dir) {
+  if (dir !== 'next' && dir !== 'previous') return;
+  combineDirection = dir;
+  refreshCombineDirectionMenu();
+  renderBodyAndTabs(); // every row's action-gutter arrow/enabled-state depends on this
+  if (combineDirectionPath) {
+    callHost('writeTextFile', { path: combineDirectionPath, text: JSON.stringify({ direction: dir }) })
+      .catch((err) => console.error('Failed to save combine direction setting', err));
+  }
+}
+
+function refreshCombineDirectionMenu() {
+  const submenu = document.getElementById('combineDirectionSubmenu');
+  if (!submenu) return;
+  submenu.querySelectorAll('[data-combine-dir]').forEach((btn) => {
+    const label = btn.dataset.combineDir === 'next' ? 'Combine with Next' : 'Combine with Previous';
+    btn.textContent = (btn.dataset.combineDir === combineDirection ? '✓ ' : '') + label;
+  });
+}
+
+document.getElementById('combineDirectionSubmenu')?.querySelectorAll('[data-combine-dir]').forEach((btn) => {
+  btn.addEventListener('click', () => { closeAllMenus(); setCombineDirection(btn.dataset.combineDir); });
+});
 
 /* ---- Recent Projects ---- */
 
@@ -2236,8 +2487,10 @@ async function init() {
   await loadFindReplaceSettings();
   await loadRecentProjects();
   await loadLastBrowsedFolder();
+  await loadCombineDirection();
   refreshDynamicColumnMenus();
   refreshRecentProjectsMenu();
+  refreshCombineDirectionMenu();
 
   // Auto-load the last project worked on, so a fresh launch picks up right
   // where you left off -- but only when there's nothing to recover; a

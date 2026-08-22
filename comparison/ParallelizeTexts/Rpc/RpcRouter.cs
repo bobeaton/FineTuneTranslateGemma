@@ -181,6 +181,12 @@ public static class RpcRouter
                 Directory.CreateDirectory(dir);
                 return new { path = Path.Combine(dir, "last-folder.json") };
             }
+            case "getCombineDirectionPath":
+            {
+                string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ParallelizeTexts");
+                Directory.CreateDirectory(dir);
+                return new { path = Path.Combine(dir, "combine-direction.json") };
+            }
             case "exit":
             {
                 Environment.Exit(0);

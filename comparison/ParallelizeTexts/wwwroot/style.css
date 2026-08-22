@@ -259,9 +259,70 @@ body {
 }
 
 .col-gutter { width: 42px; text-align: center; color: #888; font-size: 11px; cursor: pointer; background: var(--panel-bg); user-select: none; }
-.col-info   { width: 110px; font-family: var(--info-font-family); font-size: var(--info-font-size); cursor: pointer; text-align: center; }
+.col-info   {
+  width: 136px;
+  font-family: var(--info-font-family); font-size: var(--info-font-size);
+  cursor: pointer;
+}
+/* `display: flex` was set directly on the <td> here (and on .col-actions
+   below) -- which turns out to knock a table cell OUT of the table's own
+   column-layout algorithm entirely (browsers stop treating it as a real
+   table-cell for sizing once its display is overridden), leaving its
+   specified width unaccounted for and dumped as a blank gap right after it.
+   The flex layout has to live on an inner wrapper div instead, so the <td>
+   itself stays a plain table-cell. */
+.info-cell-inner { display: flex; align-items: center; justify-content: center; gap: 4px; }
+.info-lines { text-align: center; }
 .col-source { font-family: var(--source-font-family); font-size: var(--source-font-size); }
 .col-target { font-family: var(--target-font-family); font-size: var(--target-font-size); }
+
+/* With a Target column present, Source and Target otherwise both have no
+   explicit width and are left for table-layout:fixed to split the leftover
+   space between -- which in practice was not splitting it evenly (see the
+   comment above .col-actions). Once Info/Actions/Target are all in the mix,
+   spell out Source/Target's 50/50 share of the true leftover space
+   explicitly instead, so there's no leftover-space math left for the
+   browser to get wrong. #grid.has-target is toggled by renderHeader().
+   (No rule needed for the no-Target, 2-column layout -- Source is then the
+   only unset-width column, so it already gets 100% of the leftover space
+   with nothing else to divide it with.) */
+#grid.has-target .col-source,
+#grid.has-target .col-target {
+  width: calc((100% - 42px - 136px - 40px) / 2);
+}
+
+/* Shared action gutter between Source and Target -- see buildActionsCellHtml
+   in app.js for why this is its own column rather than buttons dropped
+   inside the (contenteditable) Source/Target cells. Two narrow sub-columns
+   sit side by side: Source's hugging the left/Source edge, Target's hugging
+   the right/Target edge. The width has to live on the plain `.col-actions`
+   class (matching the empty <th> too, not just the <td>s) -- table-layout:
+   fixed sizes every column from the HEADER row alone, so a td-only width
+   left the header's column unconstrained and it grabbed a full equal share
+   of the table's width instead of staying narrow. See the comment on
+   .info-cell-inner above for why the flex layout itself lives on an inner
+   wrapper div rather than directly on this <td>. */
+.col-actions { width: 40px; }
+#grid td.col-actions { padding: 4px 2px; background: var(--panel-bg); }
+.actions-cell-inner { display: flex; align-items: center; justify-content: center; gap: 2px; }
+.cell-actions { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+
+.mini-btn {
+  width: 17px; height: 17px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: none;
+  color: var(--fg);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.55;
+}
+.mini-btn:hover { opacity: 1; background: var(--border); }
+.mini-btn[disabled] { opacity: 0.15; cursor: default; }
+.mini-btn[disabled]:hover { background: none; }
+.mini-btn-delete, .mini-btn-delete-row { color: var(--bad-fg); font-weight: 700; }
 
 /* Visual cue while "click to insert smart quotes" mode is active. */
 body.quote-insert-mode td.col-source,
@@ -280,6 +341,7 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 18%, transpare
 .info-both { background: var(--info-both-bg); }
 
 .info-line { display: block; line-height: 1.3; }
+.info-diff { font-weight: 700; text-decoration: underline; }
 
 /* ---------- Status bar ---------- */
 

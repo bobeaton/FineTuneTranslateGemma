@@ -50,12 +50,23 @@
         <button class="menu-submenu-label" data-action="breakBothIntoSentences">Break into Sentences</button>
         <div class="menu-submenu" id="breakSentencesSubmenu"></div>
       </div>
+      <div class="menu-submenu-parent">
+        <button class="menu-submenu-label" data-action="joinBothIntoParagraph">Join into Single Paragraph</button>
+        <div class="menu-submenu" id="joinParagraphSubmenu"></div>
+      </div>
     </div>
   </div>
   <div class="menu">
     <button class="menu-btn" data-menu="settings">Settings</button>
     <div class="menu-dropdown" data-menu-panel="settings">
       <button data-action="openFontSettings">Fonts&hellip;</button>
+      <div class="menu-submenu-parent">
+        <button class="menu-submenu-label">Combine Direction</button>
+        <div class="menu-submenu" id="combineDirectionSubmenu">
+          <button data-combine-dir="next">Combine with Next</button>
+          <button data-combine-dir="previous">Combine with Previous</button>
+        </div>
+      </div>
     </div>
   </div>
   <div id="titleInfo"></div>
@@ -81,12 +92,20 @@
 <div id="cellContextMenu" class="context-menu" hidden>
   <button data-ctx="quoteInsertMode">Click to insert quotes (Left)/Commas (Right)&hellip;</button>
   <div class="menu-sep"></div>
-  <button data-ctx="deleteSourceCell">Delete Source cell</button>
-  <button data-ctx="deleteTargetCell">Delete Target cell</button>
+  <button data-ctx="deleteSourceCell" data-col="source"
+    data-label-both="Delete Source cell" data-label-only="Delete cell">Delete Source cell</button>
+  <button data-ctx="deleteTargetCell" data-col="target"
+    data-label-both="Delete Target cell" data-label-only="Delete cell">Delete Target cell</button>
   <button data-ctx="deleteRow">Delete row (both)</button>
   <div class="menu-sep"></div>
-  <button data-ctx="combineSourceCell">Combine Source cell with next</button>
-  <button data-ctx="combineTargetCell">Combine Target cell with next</button>
+  <button data-ctx="combinePreviousSourceCell" data-col="source"
+    data-label-both="Combine Source cell with previous" data-label-only="Combine with previous">Combine Source cell with previous</button>
+  <button data-ctx="combinePreviousTargetCell" data-col="target"
+    data-label-both="Combine Target cell with previous" data-label-only="Combine with previous">Combine Target cell with previous</button>
+  <button data-ctx="combineSourceCell" data-col="source"
+    data-label-both="Combine Source cell with next" data-label-only="Combine with next">Combine Source cell with next</button>
+  <button data-ctx="combineTargetCell" data-col="target"
+    data-label-both="Combine Target cell with next" data-label-only="Combine with next">Combine Target cell with next</button>
 </div>
 
 <div id="statusbar">

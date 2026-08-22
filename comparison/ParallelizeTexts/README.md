@@ -217,14 +217,38 @@ diagnosing again.
      curly/straight single/double quote mark (`' " ‘ ’ “ ”`) added together
      regardless of style -- it's "does one side have quote marks the other
      doesn't", not matching specific quote styles against each other.
+     Whichever of sentence/comma/quote count actually differs between
+     Source and Target is shown **bold and underlined** (on both the
+     Source-side and Target-side number for that one), so the mismatched
+     figure jumps out instead of having to compare all three pairs by eye.
   Hover any Info cell for a tooltip spelling both lines out in full, e.g.
   `# of Words in Source (9):Target (8)` / `# of Sentences (2/3)/Commas
   (1/0)/Quotation marks (3/2) -- Source/Target`.
 
   Background color flags likely misalignment:
   - orange if word counts differ by more than 11
-  - yellow if sentence, comma, or quote counts differ
+  - yellow if sentence or quote counts differ, **or** if the Target has
+    *fewer* commas than the Source. A Target with *more* commas than the
+    Source (and matching sentence/quote counts) is deliberately **not**
+    flagged -- that's usually just the target language's own punctuation
+    conventions, not a sign of a dropped clause, so it's shown in the bold
+    comma count above without the yellow background nagging about it.
   - red if both
+
+  It also carries a small **×** at its right edge -- a shortcut for
+  **Delete row (both)** (same as the right-click menu / row-gutter-then-
+  Delete).
+- **Action gutter** (only shown once a target is active): a narrow column
+  sandwiched between Source and Target with four tiny shortcut buttons --
+  **×** (delete cell) and an arrow (combine cell) for Source on the left
+  half, the same pair for Target on the right half, each hugging the text
+  column it belongs to. These do exactly what the right-click menu's
+  "Delete Source/Target cell" and "Combine Source/Target cell with
+  next/previous" do (same undo entry, same toast) -- just one click instead
+  of a right-click + menu pick. The combine arrow is greyed out wherever
+  there's no row in that direction to merge with (e.g. the last row when
+  combining with next). Which direction the arrow merges is a per-machine
+  preference -- see **Settings > Combine Direction** below.
 
 ### Editing
 
@@ -351,9 +375,14 @@ directly.
 
 Rewrites a column so every row holds exactly one sentence, splitting
 wherever it finds sentence-ending punctuation (`. ! ? : । ؟ ۔ ። ｡ 。`)
-optionally followed by closing quotes (straight or curly). A row that's
-blank -- or was nothing but punctuation/whitespace and split down to
-nothing -- is **purged** entirely rather than left behind as an empty row,
+optionally followed by a closing quote (straight or curly) and/or a closing
+parenthesis `)` -- e.g. a whole parenthetical paragraph ending `....)` stays
+on one row, as does a sentence ending `?"`. If there's a single space
+between the punctuation and its closer (e.g. `? "`), that space is removed
+and the closer still stays on the same row -- it's a typesetting gap, not a
+sentence break. A row that's blank -- or was nothing but punctuation/
+whitespace and split down to nothing -- is **purged** entirely rather than
+left behind as an empty row,
 the same trim-and-skip-blank convention Import already applies. Reports how
 many rows were split, how many were purged, and the resulting row count.
 This renumbers the whole column, so it clears undo history the same way
@@ -366,20 +395,57 @@ Import/Open does.
 - Hover it to open the submenu and pick **Source** or one specific target by
   name to split only that column.
 
+### Join into Single Paragraph
+
+The reverse of Break into Sentences: collapses every row of a column back
+down into one, joining them with a single space (blank/whitespace-only rows
+are dropped rather than leaving stray extra spaces behind). Reports how many
+rows were joined. This renumbers the whole column, so it clears undo history
+the same way Break into Sentences/Import/Open does.
+
+- Click the **Join into Single Paragraph** label itself to join **both**
+  Source and the currently-active Target together in one pass.
+- Hover it to open the submenu and pick **Source** or one specific target by
+  name to join only that column.
+
 ## Right-click on a row
 
-Right-click any cell in a row (Source, Target, Info, or the row-number
-gutter -- all equivalent) for a context menu:
+Right-click a cell for a context menu. What you see depends on which column
+you clicked:
 
-- **Delete Source cell** / **Delete Target cell** -- same as Escape-then-
-  Delete on that column, without leaving edit mode first.
+- Right-click a **Source** or **Target** cell and the menu narrows to just
+  that column's items, with the column name dropped from the label (since
+  it's now obvious from where you clicked) -- e.g. **Combine with previous**
+  instead of "Combine Source cell with previous". The other column's items
+  aren't shown at all.
+- Right-click the **Info** column or the row-number gutter -- still
+  ambiguous as to which column you mean -- and you get everything, labeled
+  with the column name (**Delete Source cell** / **Delete Target cell**,
+  etc.), same as before.
+
+**Delete row (both)** and **Click to insert quotes...** aren't column-
+specific, so they always show regardless of which column you clicked.
+
+- **Delete Source cell** / **Delete Target cell** (shown as **Delete cell**
+  when right-clicking that column directly) -- same as Escape-then-Delete on
+  that column, without leaving edit mode first.
 - **Delete row (both)** -- same as clicking the row-number gutter then
   Delete.
-- **Combine Source cell with next** / **Combine Target cell with next** --
-  merges that column's cell in the row below into the clicked row (joined
-  with a single space), then removes the now-emptied row below it, shifting
-  every later row up one. Only affects that one column -- the other column's
-  rows are untouched. Disabled if there's no next row in that column.
+- **Combine Source cell with previous** / **Combine Target cell with previous**
+  (shown as **Combine with previous** when right-clicking that column
+  directly) -- merges that column's cell in the row above into the clicked
+  row (joined with a single space), then removes the now-emptied clicked
+  row, shifting every later row up one. Only affects that one column -- the
+  other column's rows are untouched. Disabled if there's no previous row in
+  that column. (Same merge as "with next" below, just triggered from the
+  second of the two cells instead of the first.)
+- **Combine Source cell with next** / **Combine Target cell with next**
+  (shown as **Combine with next** when right-clicking that column directly)
+  -- merges that column's cell in the row below into the clicked row
+  (joined with a single space), then removes the now-emptied row below it,
+  shifting every later row up one. Only affects that one column -- the other
+  column's rows are untouched. Disabled if there's no next row in that
+  column.
 - **Click to insert quotes (Left)/Commas (Right)...** -- a mode for placing
   quote marks and commas at a specific spot. After choosing it, in a Source
   or Target cell **in that same row**: **left-click** inserts a smart quote
@@ -401,7 +467,10 @@ If you're editing `index.html` by hand to change what's in this menu: any
 `deleteTargetCell` and `deleteRow`, to grey them out when no Target is
 loaded -- needs to keep existing there, or be removed from that function
 too, or the lookup returns null and throws, which previously broke the
-*entire* menu (it never appeared at all, not just that one item).)
+*entire* menu (it never appeared at all, not just that one item). Also, any
+Source/Target-specific button needs `data-col="source"` or `data-col=
+"target"` plus `data-label-both`/`data-label-only` attributes -- those drive
+the column-narrowing and label-shortening behavior described above.)
 
 ## Settings > Fonts...
 
@@ -416,6 +485,22 @@ or fallback keyword) -- a generic fallback (`sans-serif` for Source/Target,
 get right by hand. Projects saved by an earlier version (which stored the
 full CSS value, quotes and all) still load correctly -- it's normalized back
 to a plain name the first time such a project is opened.
+
+## Settings > Combine Direction
+
+Picks which way the action gutter's combine arrow merges a cell: **Combine
+with Next** (default -- merges the row below into this one, arrow points
+down) or **Combine with Previous** (merges the row above into this one,
+arrow points up). A checkmark on the current choice.
+
+This is a per-machine setting (saved to `%APPDATA%\ParallelizeTexts\
+combine-direction.json`, like the last-browsed-folder setting), not part of
+the project file -- two people working on the same project from their own
+machines can each pick whichever direction matches how they habitually
+work, without affecting each other or needing to change it back and forth
+per-project. The right-click menu is unaffected either way -- it still
+always offers both **Combine with previous** and **Combine with next**
+regardless of this setting.
 
 ## Startup: last project auto-loads
 
