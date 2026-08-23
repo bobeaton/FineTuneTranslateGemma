@@ -189,8 +189,9 @@ function renderHeader() {
   const t = activeTarget();
   let html = '<th class="col-gutter">#</th>';
   if (t) html += '<th class="col-info">Info</th>';
+  if (t) html += '<th class="col-actions col-actions-source"></th>';
   html += '<th class="col-source">Source</th>';
-  if (t) html += '<th class="col-actions"></th>';
+  if (t) html += '<th class="col-actions col-actions-target"></th>';
   if (t) html += `<th class="col-target">Target: ${escapeHtml(t.name)}</th>`;
   headerRow.innerHTML = html;
   // table-layout:fixed splits leftover space among however many columns are
@@ -219,8 +220,9 @@ function buildRowHtml(i, t) {
   let out = `<tr data-row="${i}">`;
   out += `<td class="col-gutter" data-role="gutter" data-row="${i}">${i + 1}</td>`;
   if (t) out += buildInfoCellHtml(i, srcText, tgtText);
+  if (t) out += buildActionsCellHtml(i, 'Source', 'source', state.sourceLines, 'col-actions-source');
   out += `<td class="cell col-source" data-col="source" data-row="${i}">${escapeHtml(srcText)}</td>`;
-  if (t) out += buildActionsCellHtml(i, t);
+  if (t) out += buildActionsCellHtml(i, 'Target', 'target', t.lines, 'col-actions-target');
   if (t) out += `<td class="cell col-target" data-col="target" data-row="${i}">${escapeHtml(tgtText)}</td>`;
   out += '</tr>';
   return out;
@@ -263,38 +265,28 @@ function updateInfoCell(row) {
   cell.innerHTML = infoCellInnerHtml(info, row);
 }
 
-// The shared gutter column between Source and Target: a delete-cell (×) and
-// a combine-with-next-or-previous shortcut for each side, packed as two
-// narrow sub-columns (Source's hugging the left/Source edge, Target's
-// hugging the right/Target edge) so they read as "belonging to" whichever
-// text column they're next to. These are pure shortcuts to the same
-// deleteCell/combineCellWithNext/combineCellWithPrevious functions the
-// right-click menu uses -- same undo entries, same toasts, nothing
-// duplicated. Deliberately its own column rather than buttons overlaid
-// inside the Source/Target cells themselves, since those cells are
-// contenteditable and rely on being exactly one text node (see
-// buildRowHtml/syncCellToState) -- anything else living inside them risks
-// corrupting the saved text or confusing caret placement.
-function buildActionsCellHtml(row, t) {
+// A narrow action column immediately to the LEFT of its own text column
+// (Source-actions before Source, Target-actions before Target) -- put there
+// because deleting or combining a cell is something you decide while
+// looking at the beginning of that cell's text, not its end. Each one is a
+// pure shortcut to the same deleteCell/combineCellWithNext/
+// combineCellWithPrevious functions the right-click menu uses -- same undo
+// entries, same toasts, nothing duplicated. Deliberately its own column
+// rather than buttons overlaid inside the Source/Target cells themselves,
+// since those cells are contenteditable and rely on being exactly one text
+// node (see buildRowHtml/syncCellToState) -- anything else living inside
+// them risks corrupting the saved text or confusing caret placement.
+function buildActionsCellHtml(row, colLabel, col, arr, extraClass) {
   const previous = combineDirection === 'previous';
   const arrow = previous ? '↑' : '↓';
   const direction = previous ? 'with previous' : 'with next';
-  const canCombine = (arr) => (previous ? row > 0 : row + 1 < arr.length);
-  // Tooltips spell out which column each button belongs to (e.g. "Delete
-  // Target cell") rather than a bare "Delete cell" -- since both sides sit
-  // right next to each other in this shared gutter, the column name is the
-  // only thing the tooltip has to go on to disambiguate which button you're
-  // over.
-  const combineBtn = (colLabel, col, arr) =>
-    `<button class="mini-btn mini-btn-combine" data-mini-col="${col}" data-mini-kind="combine" data-row="${row}" `
-    + `title="Combine ${colLabel} cell ${direction}" ${canCombine(arr) ? '' : 'disabled'}>${arrow}</button>`;
-  const deleteBtn = (colLabel, col) =>
-    `<button class="mini-btn mini-btn-delete" data-mini-col="${col}" data-mini-kind="delete" data-row="${row}" `
-    + `title="Delete ${colLabel} cell">×</button>`;
-  return `<td class="col-actions" data-role="actions">`
+  const canCombine = previous ? row > 0 : row + 1 < arr.length;
+  return `<td class="col-actions ${extraClass}" data-role="actions">`
     + `<div class="actions-cell-inner">`
-    + `<div class="cell-actions cell-actions-source">${deleteBtn('Source', 'source')}${combineBtn('Source', 'source', state.sourceLines)}</div>`
-    + `<div class="cell-actions cell-actions-target">${deleteBtn('Target', 'target')}${combineBtn('Target', 'target', t.lines)}</div>`
+    + `<button class="mini-btn mini-btn-delete" data-mini-col="${col}" data-mini-kind="delete" data-row="${row}" `
+    + `title="Delete ${colLabel} cell">×</button>`
+    + `<button class="mini-btn mini-btn-combine" data-mini-col="${col}" data-mini-kind="combine" data-row="${row}" `
+    + `title="Combine ${colLabel} cell ${direction}" ${canCombine ? '' : 'disabled'}>${arrow}</button>`
     + `</div>`
     + '</td>';
 }

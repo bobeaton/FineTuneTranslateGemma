@@ -238,17 +238,19 @@ diagnosing again.
   It also carries a small **×** at its right edge -- a shortcut for
   **Delete row (both)** (same as the right-click menu / row-gutter-then-
   Delete).
-- **Action gutter** (only shown once a target is active): a narrow column
-  sandwiched between Source and Target with four tiny shortcut buttons --
-  **×** (delete cell) and an arrow (combine cell) for Source on the left
-  half, the same pair for Target on the right half, each hugging the text
-  column it belongs to. These do exactly what the right-click menu's
-  "Delete Source/Target cell" and "Combine Source/Target cell with
-  next/previous" do (same undo entry, same toast) -- just one click instead
-  of a right-click + menu pick. The combine arrow is greyed out wherever
-  there's no row in that direction to merge with (e.g. the last row when
-  combining with next). Which direction the arrow merges is a per-machine
-  preference -- see **Settings > Combine Direction** below.
+- **Action gutters** (only shown once a target is active): a narrow column
+  immediately to the **left** of Source, and another immediately to the
+  left of Target, each with two tiny shortcut buttons -- **×** (delete
+  cell) and an arrow (combine cell) -- for that column. They lead their
+  text column rather than trail it because deciding to delete or combine a
+  cell is something you do while looking at the *beginning* of its text.
+  These do exactly what the right-click menu's "Delete Source/Target cell"
+  and "Combine Source/Target cell with next/previous" do (same undo entry,
+  same toast) -- just one click instead of a right-click + menu pick. The
+  combine arrow is greyed out wherever there's no row in that direction to
+  merge with (e.g. the last row when combining with next). Which direction
+  the arrow merges is a per-machine preference -- see **Settings > Combine
+  Direction** below.
 
 ### Editing
 

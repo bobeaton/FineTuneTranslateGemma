@@ -288,24 +288,23 @@ body {
    with nothing else to divide it with.) */
 #grid.has-target .col-source,
 #grid.has-target .col-target {
-  width: calc((100% - 42px - 136px - 40px) / 2);
+  width: calc((100% - 42px - 136px - 2 * 28px) / 2);
 }
 
-/* Shared action gutter between Source and Target -- see buildActionsCellHtml
-   in app.js for why this is its own column rather than buttons dropped
-   inside the (contenteditable) Source/Target cells. Two narrow sub-columns
-   sit side by side: Source's hugging the left/Source edge, Target's hugging
-   the right/Target edge. The width has to live on the plain `.col-actions`
-   class (matching the empty <th> too, not just the <td>s) -- table-layout:
-   fixed sizes every column from the HEADER row alone, so a td-only width
-   left the header's column unconstrained and it grabbed a full equal share
-   of the table's width instead of staying narrow. See the comment on
-   .info-cell-inner above for why the flex layout itself lives on an inner
-   wrapper div rather than directly on this <td>. */
-.col-actions { width: 40px; }
+/* One narrow action column sits immediately to the LEFT of each of Source
+   and Target -- see buildActionsCellHtml in app.js for why these are their
+   own columns rather than buttons dropped inside the (contenteditable)
+   Source/Target cells, and why they lead rather than trail their column.
+   The width has to live on the plain `.col-actions` class (matching the
+   empty <th> too, not just the <td>s) -- table-layout: fixed sizes every
+   column from the HEADER row alone, so a td-only width left the header's
+   column unconstrained and it grabbed a full equal share of the table's
+   width instead of staying narrow. See the comment on .info-cell-inner
+   above for why the flex layout itself lives on an inner wrapper div
+   rather than directly on this <td>. */
+.col-actions { width: 28px; }
 #grid td.col-actions { padding: 4px 2px; background: var(--panel-bg); }
-.actions-cell-inner { display: flex; align-items: center; justify-content: center; gap: 2px; }
-.cell-actions { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.actions-cell-inner { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
 
 .mini-btn {
   width: 17px; height: 17px;
