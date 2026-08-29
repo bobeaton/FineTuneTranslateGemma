@@ -88,11 +88,19 @@ items with a `▸` at the right edge open a sub-dropdown):
   first. If you later import a *different* Source file, its name/folder
   becomes the new project path (a different Source = a different project
   file).
-- **Save As** (**Ctrl+A**) **> Project...** -- always opens a real Save
-  dialog (defaulting to wherever the project currently is), so you can
-  redirect this session to a specific folder/name instead of the
-  auto-derived default. Ctrl+A only does this outside of text-editing, so
-  it's still normal select-all-in-this-cell while a cell is being edited.
+- **Save As** (**Ctrl+A**) **> Project...** -- opens a Save dialog
+  (defaulting to wherever the project currently is) and writes a **copy** of
+  the project there. Deliberately changes *nothing* about the open session:
+  the project path, the modified state, and where File > Save will write all
+  stay exactly as they were -- like the export items below it, Save As is a
+  "send this project's data somewhere" action (often done mid-pass over many
+  projects, e.g. alongside Combine with Existing CSV), not a commitment to
+  the project itself, so exiting afterward still warns about unsaved
+  changes. Only **File > Save** writes the project's own file and clears the
+  modified state. (One exception: pointing the Save As dialog at the
+  project's *own* file is treated as a real Save.) Ctrl+A only does this
+  outside of text-editing, so it's still normal select-all-in-this-cell
+  while a cell is being edited.
   - **Comparison JSON...** -- the same `{Translators, Translations}` shape
     `BuildComparisonJson` produces, ready to drop into the
     [rating webapp](../rating_webapp/). Rows are aligned by index across
@@ -136,7 +144,11 @@ items with a `▸` at the right edge open a sub-dropdown):
   stack (an undo entry tagged for a target that just got removed, or that
   shifted to a different index, can't be replayed correctly).
 - **Exit** -- same unsaved-changes prompt as New Project, then closes the
-  app (only after a real Save completes, or you choose Don't Save).
+  app (only after a real Save completes, or you choose Don't Save). Choosing
+  **Don't Save** additionally parks the abandoned edits in the
+  crash-recovery file before closing, so the next launch offers
+  Restore/Discard -- a mis-clicked Don't Save is never permanent loss (see
+  "Autosave / crash recovery" below).
 - Both `Import` and both text-based `Save As` targets are trimmed and
   blank-line-filtered exactly like `BuildComparisonJson` does, so a stray
   blank line never becomes an empty row.
@@ -152,15 +164,31 @@ specific default (e.g. Save defaulting next to the currently-open project)
 uses that instead. Persists across launches in
 `%APPDATA%\ParallelizeTexts\last-folder.json`.
 
-### Unsaved changes (New Project, Exit)
+### Unsaved changes (New Project, Open Project, Exit, window X button)
 
-If there are unsaved changes when you choose **New Project** or **Exit**, a
-prompt asks **Save** / **Don't Save** / **Cancel**. **Cancel** aborts the
-action entirely (project stays open, app stays running); **Don't Save**
-proceeds without writing anything; **Save** runs a normal Save first (which
-may itself open a Save As dialog if nothing's been explicitly saved yet) and
-only proceeds if that save actually completes -- cancelling *that* dialog
-cancels New Project/Exit too, rather than silently discarding.
+If there are unsaved changes when you choose **New Project**, **Open
+Project** (including a Recent Projects entry), or **Exit** -- or close the
+window with the **X button**/Alt+F4, which is intercepted and routed through
+the exact same flow -- a prompt asks **Save** / **Don't Save** / **Cancel**.
+**Cancel** aborts the action entirely (project stays open, app stays
+running); **Don't Save** proceeds without writing the project -- the file
+the project was opened from is left byte-for-byte as it was, so a session's
+mistakes can always be abandoned (and on **Exit** specifically, the
+abandoned edits are parked in the crash-recovery file as a last-chance
+backup); **Save** runs a normal File > Save first (which may itself open a
+Save dialog if nothing's been explicitly saved yet) and only proceeds if
+that save actually completes -- cancelling *that* dialog cancels New
+Project/Open/Exit too, rather than silently discarding.
+
+Note that a **Save As** does *not* count as saving the project -- it writes
+a detached copy and leaves the modified state alone (see the File menu,
+above) -- so exiting after only a Save As still warns.
+
+Merely clicking around does **not** count as a change: committing a cell
+whose text is identical to what's already in the project is a no-op (click
+enters edit mode directly, and every menu action commits the
+currently-edited cell first, so without that check just clicking a cell and
+then touching a menu used to flag the project as modified).
 
 ### Overwrite warning (New Project + re-Save)
 
@@ -183,16 +211,20 @@ CSV) goes through native OS file dialogs (Photino's `ShowOpenFile`/
 `ShowSaveFile`), not a browser download/upload -- there's no file-size or
 sandboxing limitation.
 
-**Autosave vs. a real Save are deliberately different files** until you've
-saved for real at least once this session: even though the project's
-eventual `.paraproj` path is already known (see Save, above), autosave keeps
-writing to `%APPDATA%\ParallelizeTexts\autosave-recovery.paraproj` only,
-never silently creating/overwriting the real file on its own. The title bar
-says `will save as <name>.paraproj -- not yet saved -- autosaving to
-recovery` in this state. The moment you do a real Save/Save As/Open, that
-`.paraproj` becomes the autosave target too (and the recovery file is deleted,
-since it's no longer needed) and the title bar switches to `<name>.paraproj
--- saved`/`unsaved changes`.
+**Autosave and a real Save are always different files.** Autosave writes
+only to `%APPDATA%\ParallelizeTexts\autosave-recovery.paraproj` -- it never
+creates or overwrites the real `.paraproj`, no matter how established that
+path is. The real file is written *exclusively* by an explicit **File >
+Save** (Save As writes a detached copy elsewhere and doesn't count), so the
+project as it sits on disk (its content **and** its last-modified timestamp)
+stays untouched until you deliberately save, and any session can be
+abandoned via Don't Save with the original intact. (Autosave originally
+switched to writing the real `.paraproj` directly once a project had been
+saved or opened -- which meant opening someone's project and merely clicking
+around could silently rewrite their file five seconds later. That's exactly
+the disaster this exists to prevent, so it was removed.) The title bar shows
+`<name>.paraproj -- saved` when clean and `unsaved changes -- file on disk
+untouched until you Save` when dirty.
 
 ### A real, found-and-fixed bug: Save As silently doing nothing
 
@@ -535,15 +567,33 @@ starts empty instead of erroring.
 
 ## Autosave / crash recovery
 
-Every ~5 seconds after an edit:
-- If the project has already been saved at least once, it's silently
-  re-saved to that same `.paraproj` path (no dialog).
-- If it hasn't been saved yet, a recovery copy is written instead to
-  `%APPDATA%\ParallelizeTexts\autosave-recovery.paraproj` (Windows) / the
-  platform equivalent of `ApplicationData` elsewhere. On next launch, if that
-  file exists, a banner offers to **Restore** or **Discard** it. The recovery
-  file is deleted as soon as you do a real Save/Open (it's only there to
-  cover the "app crashed before I saved" case).
+Every ~5 seconds after a substantive edit, a recovery copy of the project is
+written to `%APPDATA%\ParallelizeTexts\autosave-recovery.paraproj` (Windows)
+/ the platform equivalent of `ApplicationData` elsewhere. That is the *only*
+file autosave ever writes -- the real `.paraproj` is written exclusively by
+an explicit File > Save (see "Autosave and a real Save are always different
+files" above).
+
+If the app crashes, the next launch shows a banner offering to **Restore**
+or **Discard** the recovery copy. The recovery file records which project it
+was a backup of, so **Restore** points Save back at that same `.paraproj` --
+but deliberately *not* as an established save location: the first Save after
+a restore still asks **Overwrite** / **Save As...** / **Cancel**, so
+crash-recovered edits never replace the original file without explicit
+confirmation.
+
+The recovery file is deleted when the session's state supersedes it: on a
+real File > Save, and on Open/New Project. It is **not** deleted on Exit --
+quite the opposite: choosing **Don't Save** on the exit prompt writes a
+fresh recovery copy of the abandoned edits on the way out, so the next
+launch's Restore/Discard banner gives one last chance to get them back if
+Don't Save was a mis-click (Restore, as always, still requires an explicit
+Overwrite confirmation before those edits can touch the original file). And
+a session that exits clean leaves any *earlier* session's pending recovery
+file alone rather than destroying it in passing. It's a single slot, though:
+whatever is in it survives only until the next session autosaves over it,
+saves, or opens/news a project -- for edits worth keeping, File > Save (or
+Save As a copy) is the durable answer.
 
 ## Project file format (`.paraproj`)
 

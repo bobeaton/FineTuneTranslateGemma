@@ -37,13 +37,40 @@ internal static class Program
             .SetContextMenuEnabled(false)
             .SetTemporaryFilesPath(webViewDataPath)
             .RegisterWebMessageReceivedHandler(OnWebMessageReceived)
+            .RegisterWindowClosingHandler(OnWindowClosing)
             .Load("wwwroot/index.html");
 
         window.WaitForClose();
     }
 
+    // True once the page has completed at least one RPC round trip -- i.e.
+    // its JS actually loaded and is listening. Gates OnWindowClosing below.
+    private static volatile bool _uiIsAlive;
+
+    private static bool OnWindowClosing(object sender, EventArgs args)
+    {
+        // The X button / Alt+F4 must run the same unsaved-changes guard as
+        // File > Exit, and that guard lives in JS. So cancel the native close
+        // and hand the decision to the page; if it decides closing is fine it
+        // calls the 'exit' RPC (Environment.Exit), which never comes back
+        // through here. If the page never loaded, there's no unsaved work a
+        // guard could protect (and nobody listening for the event) -- let the
+        // close proceed rather than trap the user in an unclosable window.
+        if (!_uiIsAlive) return false;
+        try
+        {
+            ((PhotinoWindow)sender).SendWebMessage("{\"event\":\"closeRequested\"}");
+            return true; // cancel this close -- JS runs the guard, then exits via RPC
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private static void OnWebMessageReceived(object? sender, string message)
     {
+        _uiIsAlive = true;
         var window = (PhotinoWindow)sender!;
         string id = "";
         try

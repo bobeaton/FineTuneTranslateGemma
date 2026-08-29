@@ -10,6 +10,10 @@ const pendingRpc = new Map();
 window.external.receiveMessage((raw) => {
   let msg;
   try { msg = JSON.parse(raw); } catch { return; }
+  // Host-initiated events (not a response to one of our RPC calls): the C#
+  // side cancels native window closes and hands them to us, so the X button
+  // gets the same unsaved-changes guard as File > Exit.
+  if (msg.event === 'closeRequested') { handleHostCloseRequest(); return; }
   const entry = pendingRpc.get(msg.id);
   if (!entry) return;
   pendingRpc.delete(msg.id);
@@ -65,8 +69,10 @@ function sanitizeFontFamily(raw) {
 
 const state = {
   projectPath: null,       // where Save/autosave-once-confirmed writes; auto-derived from the Source file on import
-  hasExplicitlySaved: false, // true once the user has done a real Save/Save As/Open this session -- gates whether
-                              // autosave is allowed to write to projectPath, or must stick to recoveryPath
+  hasExplicitlySaved: false, // true once the user has done a real File > Save or Open this session -- gates
+                              // whether a plain Save may write to projectPath without an overwrite confirmation.
+                              // Save As does NOT set this (it writes a detached copy; see saveProjectCopyAs),
+                              // and autosave never writes to projectPath at all (recovery file only; see doAutosave).
   recoveryPath: null,
   sourceFilePath: null,
   sourceLines: [],
@@ -356,7 +362,7 @@ function updateTitleInfo() {
   const bits = [];
   if (state.hasExplicitlySaved && state.projectPath) {
     bits.push(baseNameWithExt(state.projectPath));
-    bits.push(state.dirty ? 'unsaved changes' : 'saved');
+    bits.push(state.dirty ? 'unsaved changes — file on disk untouched until you Save' : 'saved');
   } else if (state.projectPath) {
     bits.push(`will save as ${baseNameWithExt(state.projectPath)}`);
     bits.push('not yet saved — autosaving to recovery');
@@ -436,12 +442,23 @@ function syncCellToState(cell) {
   const col = cell.dataset.col;
   const row = parseInt(cell.dataset.row, 10);
   const text = cell.textContent;
+  // Only mark the project modified when the text actually differs from
+  // state. Click already enters edit mode directly, and every menu action
+  // commits the cell being edited first -- so without this check, merely
+  // clicking a cell and then touching any menu flagged the project dirty
+  // (and, before autosave was made recovery-only, silently rewrote the real
+  // .paraproj on disk) with zero substantive edits made.
   if (col === 'source') {
+    if (text === (state.sourceLines[row] ?? '')) return;
     ensureIndex(state.sourceLines, row);
     state.sourceLines[row] = text;
   } else if (col === 'target') {
     const t = activeTarget();
-    if (t) { ensureIndex(t.lines, row); t.lines[row] = text; }
+    if (!t || text === (t.lines[row] ?? '')) return;
+    ensureIndex(t.lines, row);
+    t.lines[row] = text;
+  } else {
+    return;
   }
   markDirty();
   updateInfoCell(row);
@@ -1049,7 +1066,7 @@ document.addEventListener('keydown', (e) => {
   if (isSaveCombo) {
     e.preventDefault();
     commitEditIfAny();
-    saveProject(false);
+    saveProject();
     return;
   }
   // Ctrl+A for Save As, per request -- only outside of text-editing, so it
@@ -1058,7 +1075,7 @@ document.addEventListener('keydown', (e) => {
   if (isSaveAsCombo && selection.mode !== 'editing') {
     e.preventDefault();
     commitEditIfAny();
-    saveProject(true);
+    saveProjectCopyAs();
     return;
   }
   if (selection.mode === 'editing') {
@@ -1114,12 +1131,12 @@ async function runMenuAction(action) {
       case 'importTarget': await importTarget(); break;
       case 'newProject': await newProject(); break;
       case 'openProject': await openProject(); break;
-      case 'save': await saveProject(false); break;
-      case 'saveAsProject': await saveProject(true); break;
+      case 'save': await saveProject(); break;
+      case 'saveAsProject': await saveProjectCopyAs(); break;
       case 'saveAsComparisonJson': await saveAsComparisonJson(); break;
       case 'saveAsCsv': await saveAsCsv(); break;
       case 'saveAsCombineWithCsv': await saveAsCombineWithCsv(); break;
-      case 'exit': await exitApp(); break;
+      case 'exit': await handleHostCloseRequest(); break;
       case 'undo': performUndo(); break;
       case 'openFontSettings': openFontModal(); break;
       case 'openFindReplace': openFindReplacePanel(); break;
@@ -1161,9 +1178,9 @@ async function importSource() {
   state.sourceLines = lr.lines;
   // Each Source file gets its own project identity -- same base name, same
   // folder, .paraproj extension -- established immediately so File > Save
-  // already knows where to go without a forced first Save As. Autosave still
-  // won't write there until an explicit Save actually happens (see
-  // doAutosave/hasExplicitlySaved); until then it keeps using the recovery file.
+  // already knows where to go without a forced first Save As. Autosave never
+  // writes there (it only ever writes the crash-recovery file; see
+  // doAutosave) -- only an explicit Save/Save As touches the real path.
   state.projectPath = suggestedProjectPath();
   state.hasExplicitlySaved = false;
   markDirty();
@@ -2132,7 +2149,8 @@ function refreshRecentProjectsMenu() {
 function confirmUnsavedChanges(actionLabel) {
   return new Promise((resolve) => {
     document.getElementById('unsavedChangesText').textContent =
-      `You have unsaved changes. Save them before ${actionLabel}?`;
+      `You have unsaved changes — if you don't save them, they will be lost ` +
+      `(the project file on disk stays as it was). Save them before ${actionLabel}?`;
     document.getElementById('unsavedChangesOverlay').hidden = false;
 
     const saveBtn = document.getElementById('unsavedSaveBtn');
@@ -2185,14 +2203,16 @@ function confirmOverwrite(path) {
 
 // Runs the confirm-if-dirty flow, then calls onProceed() only if it's safe
 // to continue (nothing was dirty, the user chose to discard, or Save
-// actually completed). Shared by New Project and Exit.
+// actually completed). Shared by New Project and Open Project (incl. Recent
+// Projects); Exit has its own version that additionally parks discarded
+// edits in the recovery file (see exitApp).
 async function withUnsavedChangesGuard(actionLabel, onProceed) {
   if (state.dirty) {
     const choice = await confirmUnsavedChanges(actionLabel);
     if (choice === 'cancel') return;
     if (choice === 'save') {
-      const saved = await saveProject(false);
-      if (!saved) return; // Save As was cancelled, or it failed -- don't proceed
+      const saved = await saveProject();
+      if (!saved) return; // the Save dialog was cancelled, or it failed -- don't proceed
     }
   }
   await onProceed();
@@ -2218,18 +2238,49 @@ async function newProject() {
 }
 
 async function exitApp() {
-  await withUnsavedChangesGuard('exiting', async () => {
-    await callHost('exit', {});
-  });
+  if (state.dirty) {
+    const choice = await confirmUnsavedChanges('exiting');
+    if (choice === 'cancel') return;
+    if (choice === 'save') {
+      const saved = await saveProject();
+      if (!saved) return; // Save dialog cancelled/failed -- don't close on top of it
+    } else {
+      // Don't Save: the on-disk project stays byte-for-byte untouched (only
+      // File > Save ever writes it), and the abandoned edits are parked in
+      // the crash-recovery file -- freshly written, so it isn't up to 5s
+      // stale from the autosave timer. Next launch offers Restore/Discard,
+      // so a mis-clicked "Don't Save" is never permanent loss. It's one
+      // slot, though: the next session's first autosave overwrites it, and
+      // Save/Open/New Project in that session deletes it.
+      try { await writeRecoveryFile(); } catch { /* best-effort */ }
+    }
+  }
+  // Note: a clean exit deliberately does NOT delete the recovery file -- if
+  // one is pending from an earlier session (its banner not yet acted on),
+  // this session passing through mustn't destroy it.
+  await callHost('exit', {});
+}
+
+// The host cancels every native close (X button, Alt+F4) and asks us to run
+// the same unsaved-changes guard as File > Exit; see OnWindowClosing in
+// Program.cs. The flag keeps a second X-click from stacking a second
+// confirmation dialog on top of one that's already open.
+let exitGuardInFlight = false;
+async function handleHostCloseRequest() {
+  if (exitGuardInFlight) return;
+  exitGuardInFlight = true;
+  try { await exitApp(); } finally { exitGuardInFlight = false; }
 }
 
 async function openProject() {
-  const res = await chooseOpenFile({
-    title: 'Open Project',
-    filters: [{ name: 'ParallelizeTexts Project', extensions: ['paraproj'] }],
+  await withUnsavedChangesGuard('opening another project', async () => {
+    const res = await chooseOpenFile({
+      title: 'Open Project',
+      filters: [{ name: 'ParallelizeTexts Project', extensions: ['paraproj'] }],
+    });
+    if (!res.path) return;
+    await loadProjectFromPath(res.path);
   });
-  if (!res.path) return;
-  await loadProjectFromPath(res.path);
 }
 
 // Shared by the Open Project dialog and clicking an entry in Recent Projects.
@@ -2248,47 +2299,62 @@ async function loadProjectFromPath(path) {
 }
 
 async function openRecentProject(path) {
-  try {
-    await loadProjectFromPath(path);
-  } catch (err) {
-    showToast(`Couldn't open ${path}: ${(err && err.message) || err}`, true);
-    // Stale entry (file moved/deleted since) -- drop it rather than leave a dead link.
-    recentProjects = recentProjects.filter((p) => p !== path);
-    saveRecentProjects();
-    refreshRecentProjectsMenu();
-  }
+  await withUnsavedChangesGuard('opening another project', async () => {
+    try {
+      await loadProjectFromPath(path);
+    } catch (err) {
+      showToast(`Couldn't open ${path}: ${(err && err.message) || err}`, true);
+      // Stale entry (file moved/deleted since) -- drop it rather than leave a dead link.
+      recentProjects = recentProjects.filter((p) => p !== path);
+      saveRecentProjects();
+      refreshRecentProjectsMenu();
+    }
+  });
 }
 
-// Returns true once the project is actually written to disk, false if the
-// user cancelled the Save As dialog -- New Project and Exit both need to
-// know which happened, so they don't proceed to clear/close on a cancel.
-async function saveProject(forceDialog) {
+// File > Save -- the ONLY operation that writes the project's own .paraproj
+// and clears the modified flag. Returns true once the project is actually
+// written to disk, false on cancel/failure -- New Project, Open, and Exit
+// need to know which happened, so they don't proceed to clear/close on a
+// cancel.
+async function saveProject() {
   // Once a Source (or Target) is imported, projectPath is already the
   // auto-derived <name>.paraproj -- plain Save just writes there with no
-  // dialog. forceDialog (Save As) always prompts, defaulting to wherever the
-  // project currently is/would be, so the user can redirect it elsewhere.
-  let path = (!forceDialog) ? state.projectPath : null;
+  // dialog (after the overwrite confirmation below, the first time).
+  let path = state.projectPath;
   if (!path) {
     const res = await chooseSaveFile({
       title: 'Save Project',
-      defaultPath: state.projectPath || suggestedProjectPath(),
+      defaultPath: suggestedProjectPath(),
       filters: [{ name: 'ParallelizeTexts Project', extensions: ['paraproj'] }],
     });
     if (!res.path) return false;
     path = res.path;
   } else if (!state.hasExplicitlySaved) {
-    // A plain Save going straight to an auto-derived path (e.g. right after
-    // New Project + re-importing the same Source) that this session has
-    // never actually confirmed -- if a file's already sitting there, that's
-    // very likely an earlier session's real project, not a blank slate.
-    // Without this check it gets silently overwritten with no dialog ever
-    // shown, since Save only prompts when projectPath *isn't* already known.
+    // A plain Save going straight to a path this session has never actually
+    // confirmed (auto-derived from an Import, or carried over from a crash
+    // recovery) -- if a file's already sitting there, that's very likely a
+    // real project from an earlier session, not a blank slate. Without this
+    // check it gets silently overwritten with no dialog ever shown, since
+    // Save only prompts when projectPath *isn't* already known.
     let exists = false;
     try { ({ exists } = await callHost('fileExists', { path })); } catch { /* best-effort */ }
     if (exists) {
       const choice = await confirmOverwrite(path);
       if (choice === 'cancel') return false;
-      if (choice === 'saveAs') return await saveProject(true);
+      if (choice === 'saveAs') {
+        // Redirect THIS save somewhere else. Unlike the Save As menu item
+        // (which writes a detached copy -- see saveProjectCopyAs), the
+        // user's intent here was a real Save, just not onto that file -- so
+        // the session retargets to wherever they pick and comes out clean.
+        const res = await chooseSaveFile({
+          title: 'Save Project',
+          defaultPath: path,
+          filters: [{ name: 'ParallelizeTexts Project', extensions: ['paraproj'] }],
+        });
+        if (!res.path) return false;
+        path = res.path;
+      }
       // 'overwrite' -- fall through and save to `path` below as normal.
     }
   }
@@ -2300,6 +2366,40 @@ async function saveProject(forceDialog) {
   await deleteRecoveryFile();
   recordRecentProject(path);
   showToast(`Project saved to ${path}`);
+  return true;
+}
+
+// Case/slash-insensitive path equality, for spotting "Save As picked the
+// project's own file" on Windows paths.
+function samePath(a, b) {
+  if (!a || !b) return false;
+  const norm = (p) => p.replace(/\//g, '\\').toLowerCase();
+  return norm(a) === norm(b);
+}
+
+// Save As > Project -- writes a COPY of the project wherever the dialog
+// points, and deliberately changes NOTHING about the open session: the
+// project path, the modified flag, and where File > Save will write all stay
+// exactly as they were. Rationale: Save As lives next to the export actions
+// (Comparison JSON / CSV / Combine with CSV) and is used the same way -- as
+// part of a "fold this project into a dataset" pass over many projects --
+// so it must not count as having saved the project itself, and exiting
+// afterward still warns about the unsaved changes. The one exception: if
+// the chosen path IS the project's own file, that's a real Save in intent,
+// so it's treated as one (modified flag cleared).
+async function saveProjectCopyAs() {
+  const res = await chooseSaveFile({
+    title: 'Save Copy of Project As',
+    defaultPath: state.projectPath || suggestedProjectPath(),
+    filters: [{ name: 'ParallelizeTexts Project', extensions: ['paraproj'] }],
+  });
+  if (!res.path) return false;
+  if (samePath(res.path, state.projectPath)) return await saveProject();
+  await writeProjectTo(res.path);
+  showToast(
+    `Copy saved to ${res.path}` +
+    (state.dirty ? ' — the open project itself still has unsaved changes (File > Save writes those)' : '')
+  );
   return true;
 }
 
@@ -2425,32 +2525,41 @@ function scheduleAutosave() {
 
 async function doAutosave() {
   if (!state.dirty) return;
-  // Once the user has done a real Save/Save As/Open, autosave keeps that
-  // exact file current. Before that -- even though projectPath is usually
-  // already known (auto-derived from the Source file's name) -- autosave
-  // deliberately still only writes to the crash-recovery file, so it never
-  // silently creates/overwrites the real .paraproj before the user has
-  // explicitly chosen to save.
-  if (state.hasExplicitlySaved && state.projectPath) {
-    try {
-      await writeProjectTo(state.projectPath);
-      state.dirty = false;
-      updateTitleInfo();
-    } catch (err) {
-      console.error('Autosave failed', err);
-    }
-    return;
-  }
+  // Autosave writes ONLY to the crash-recovery file in AppData -- never to
+  // the real .paraproj, no matter how established its path is. The file the
+  // project was opened from (or saved to) is only ever written by an
+  // explicit Save/Save As, so a session's mistakes can always be abandoned
+  // by exiting without saving and the on-disk project stays exactly as it
+  // was. (Autosave used to write straight to projectPath once a project had
+  // been opened/saved -- which silently clobbered opened projects the user
+  // never meant to change.)
   if (!state.recoveryPath) return;
   try {
-    await writeProjectTo(state.recoveryPath);
+    await writeRecoveryFile();
     // dirty stays true -- only the crash-recovery copy is current.
   } catch (err) {
     console.error('Autosave failed', err);
   }
 }
 
+async function writeRecoveryFile() {
+  if (!state.recoveryPath) return;
+  const data = serializeProject();
+  // Remember which real project this backup belongs to, so Restore on the
+  // next launch can point Save back at it -- still behind the explicit
+  // overwrite confirmation (see the recoveryRestore handler): a crash
+  // recovery must never overwrite the original file on its own.
+  data.recoveryOriginalProjectPath = state.projectPath || null;
+  await callHost('writeTextFile', { path: state.recoveryPath, text: JSON.stringify(data, null, 2) });
+}
+
 async function deleteRecoveryFile() {
+  // Also drop any autosave still pending on the 5s timer -- every caller
+  // (real Save, Open, New Project, clean Exit) is declaring the current
+  // recovery copy obsolete, so a timer firing right after this would just
+  // resurrect it (worst case: an exiting session leaves behind a recovery
+  // file for edits the user explicitly chose to discard).
+  if (autosaveTimer) { clearTimeout(autosaveTimer); autosaveTimer = null; }
   if (!state.recoveryPath) return;
   try { await callHost('deleteFile', { path: state.recoveryPath }); } catch { /* best-effort */ }
 }
@@ -2472,9 +2581,15 @@ async function checkForRecovery() {
 document.getElementById('recoveryRestore').addEventListener('click', async () => {
   document.getElementById('recoveryBanner').hidden = true;
   const { text } = await callHost('readTextFile', { path: state.recoveryPath });
-  loadProjectData(JSON.parse(text));
-  state.projectPath = suggestedProjectPath(); // re-derive from the restored Source's own name/folder
-  state.hasExplicitlySaved = false; // still not confirmed by a real Save this session
+  const data = JSON.parse(text);
+  loadProjectData(data);
+  // Point Save back at the project this backup came from (falling back to
+  // re-deriving from the restored Source's own name/folder for pre-Save
+  // work) -- but leave hasExplicitlySaved false, so the first Save still
+  // runs the Overwrite/Save As/Cancel confirmation instead of silently
+  // replacing the original file with crash-recovered edits.
+  state.projectPath = data.recoveryOriginalProjectPath || suggestedProjectPath();
+  state.hasExplicitlySaved = false;
   state.dirty = true; // recovered content has not yet been saved to a real project path
   selection.mode = 'none';
   undoStack.length = 0;
