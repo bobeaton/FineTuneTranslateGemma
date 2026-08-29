@@ -1118,6 +1118,7 @@ async function runMenuAction(action) {
       case 'saveAsProject': await saveProject(true); break;
       case 'saveAsComparisonJson': await saveAsComparisonJson(); break;
       case 'saveAsCsv': await saveAsCsv(); break;
+      case 'saveAsCombineWithCsv': await saveAsCombineWithCsv(); break;
       case 'exit': await exitApp(); break;
       case 'undo': performUndo(); break;
       case 'openFontSettings': openFontModal(); break;
@@ -2329,6 +2330,44 @@ async function saveAsCsv() {
   if (!res.path) return;
   await callHost('writeCsv', { path: res.path, project: exportProjectPayload() });
   showToast(`CSV saved to ${res.path}`);
+}
+
+// Remembered target CSV for "Combine with Existing CSV" -- for the workflow
+// of opening one *.paraproj after another and folding each into the same
+// growing master file, so it's only asked for once per running instance,
+// not once per project opened.
+let combineWithCsvPath = null;
+
+async function saveAsCombineWithCsv() {
+  if (!combineWithCsvPath) {
+    const res = await chooseOpenFile({
+      title: 'Combine With Existing CSV',
+      filters: [{ name: 'CSV', extensions: ['csv'] }],
+    });
+    if (!res.path) return;
+    combineWithCsvPath = res.path;
+  }
+
+  // The four-digit number (e.g. "0050" from "0050_Something.paraproj") that
+  // fills column 1 when the target CSV turns out to have 3 columns.
+  const numberSource = state.projectPath || state.sourceFilePath || (state.targets[0] && state.targets[0].filePath) || '';
+  const numberMatch = baseNameNoExt(numberSource).match(/\d{4}/);
+
+  const result = await callHost('combineCsv', {
+    path: combineWithCsvPath,
+    project: exportProjectPayload(),
+    numberValue: numberMatch ? numberMatch[0] : '',
+  });
+
+  if (!result.ok) {
+    // Only a bad file (wrong column count / unreadable) should forget the
+    // remembered path -- a missing four-digit number is a problem with this
+    // project's file name, not with the chosen CSV, so keep it remembered.
+    if (result.errorType === 'badColumnCount' || result.errorType === 'notFound') combineWithCsvPath = null;
+    throw new Error(result.error);
+  }
+
+  showToast(`Added ${result.rowsAdded} row(s) to ${combineWithCsvPath}`);
 }
 
 /* =========================================================================

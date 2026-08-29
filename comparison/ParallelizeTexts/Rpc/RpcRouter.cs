@@ -28,6 +28,7 @@ public static class RpcRouter
     private sealed class PathPayload { public string Path { get; set; } = ""; }
     private sealed class TextFilePayload { public string Path { get; set; } = ""; public string Text { get; set; } = ""; }
     private sealed class ExportPayload { public string Path { get; set; } = ""; public ExportProjectDto Project { get; set; } = new(); }
+    private sealed class CombineCsvPayload { public string Path { get; set; } = ""; public ExportProjectDto Project { get; set; } = new(); public string NumberValue { get; set; } = ""; }
     private sealed class MessagePayload { public string Title { get; set; } = ""; public string Text { get; set; } = ""; public string Icon { get; set; } = "info"; }
 
     public static object? Dispatch(PhotinoWindow window, string action, JsonElement payload)
@@ -132,6 +133,12 @@ public static class RpcRouter
                 var p = payload.Deserialize<ExportPayload>(JsonOptions)!;
                 CsvExporter.Write(p.Path, p.Project);
                 return new { ok = true };
+            }
+            case "combineCsv":
+            {
+                var p = payload.Deserialize<CombineCsvPayload>(JsonOptions)!;
+                var result = CsvCombiner.Combine(p.Path, p.Project, p.NumberValue);
+                return new { ok = result.Ok, error = result.Error, errorType = result.ErrorType, rowsAdded = result.RowsAdded };
             }
             case "showMessage":
             {

@@ -101,6 +101,26 @@ items with a `▸` at the right edge open a sub-dropdown):
     per target translator, `|` as the delimiter. A literal `|` or newline
     inside a cell is swapped out (full-width `｜`, or a space) so it can't
     silently break the column alignment.
+  - **Combine with Existing CSV...** -- appends the current project's Source
+    and (first) Target as new rows onto an existing CSV, instead of writing a
+    new file. Meant for opening one `.paraproj` after another and folding
+    each into the same growing master file: the first click asks which CSV
+    to append to and remembers that choice for the rest of this run (no
+    re-asking for each subsequent project), and the target file is backed up
+    (`<name>.csv.bak`) the first time this run touches it.
+    The existing file's header row decides both the delimiter and the shape:
+    whichever of `|`, `,`, `;`, or tab actually splits the header into 2 or 3
+    columns is reused for the appended rows too. 2 columns means
+    `Source,Target`; 3 columns means `Number,Source,Target`, where `Number`
+    is the four-digit number pulled from the project's own file name (e.g.
+    `0050` from `0050_Something.paraproj`); no delimiter producing 2 or 3
+    columns, or any other column count, stops with a warning instead of
+    guessing. A literal delimiter character (or newline) inside a cell is
+    swapped out (its fullwidth Unicode lookalike, e.g. `,` -> `，`; a space
+    for tab) so it can't silently break the column alignment. A missing
+    four-digit number (3-column target, no 4 digits in the project's name)
+    also stops with a warning but leaves the remembered file in place, since
+    the CSV itself was fine.
 - **Import Source...** -- pick a `.txt` file; each line becomes one row's
   Source cell.
 - **Import Target...** -- pick a `.txt` file; the file's name (without
