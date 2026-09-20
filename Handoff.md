@@ -166,6 +166,90 @@ as the NLLB Docker containers, so it plugs straight into the
    `output\translategemma-4b-hi-xnr-lora\final`. Test with:
    `.venv\Scripts\python.exe scripts\translate.py --direction hi2xnr --text "<Hindi sentence>"`
 
+## Session 3 (2026-08-29/30): v2 hi-xnr comparison run, then hi-dgo setup
+
+### v2 hi-xnr adapter — DONE ✅ (side-by-side with v1, v1 untouched)
+
+Bob supplied an expanded couplets CSV and asked for a v2 adapter trained
+side-by-side with the original, purely for comparison — nothing about v1 was
+touched (adapter, merged model, or the running `translategemma` container).
+
+- New couplets CSV (`Addl Hindi-Kangri Couplets (w-0050-64).csv`, 10,051 rows)
+  merged into `data\GemmaDataSet_HIN_XNR_Total_v2.json` (62,956 examples).
+- Trained with identical hyperparameters to v1 → adapter
+  `output\translategemma-4b-hi-xnr-lora-v2\final`. Final eval loss **0.514**,
+  eval token accuracy **88.8%** (v1 was 0.520 / 88.6%).
+- Merged → `models\translategemma-4b-hi-xnr-merged-v2` (8.2 GB, standalone).
+- Same 4-case sanity check as v1 (`output\adapter_test_results_v2.json`):
+  mixed but slightly favorable — v2 exact-matched the reference on the
+  Genesis hi→xnr case (v1 used a synonym), matched v1 exactly on the CSV
+  couplet case, but paraphrased (still correctly) on the Genesis xnr→hi case
+  where v1 had hit an exact match, and produced a more literal but more
+  verbose "market" sentence on the novel non-biblical test.
+- Both v1 and v2 merged models now sit side by side under `models\`; only one
+  can be loaded into the (single, 8 GB) GPU/Docker container at a time.
+- **Multiple named containers, one at a time:** built a second container
+  `translategemma-v2` (image still `translategemma-translator`, same port
+  8010) serving the v2 merged model, alongside the original `translategemma`
+  container serving v1. Fixed a real bug in
+  [docker/buildDocker.ps1](docker/buildDocker.ps1) along the way: the local
+  model sync used one hard-coded cache volume name
+  (`translategemma-model-cache`) regardless of `-ContainerName`, so starting
+  a second named container for a different model would have silently
+  overwritten the first one's cached copy — now namespaced per container
+  (`translategemma-model-cache-<ContainerName>`; the original default name
+  is preserved so existing setups don't pay for a re-sync). Pattern for any
+  number of models going forward:
+  ```powershell
+  .\buildDocker.ps1 -ContainerName translategemma -Model ..\models\translategemma-4b-hi-xnr-merged -Detached
+  .\buildDocker.ps1 -ContainerName translategemma-v2 -Model ..\models\translategemma-4b-hi-xnr-merged-v2 -Detached
+  .\buildDocker.ps1 -ContainerName translategemma-hi-dgo -Model ..\models\translategemma-4b-hi-dgo-merged -Detached
+  ```
+  Since they all share port 8010, only one can be `Up` at a time —
+  `docker stop <name>` the current one, then `docker start <name>` the next
+  (no rebuild needed once each has been built once).
+
+### hi-dgo (Hindi ↔ Dogri) — attempt 1 INVALIDATED and deleted ❌
+
+Bob asked to set up a third language pair, Hindi-Dogri. Dataset built, a
+full ~10h training run completed, adapter merged — then a data-quality bug
+was found and the whole thing was deleted (per Bob: "this fine tuning was
+useless"). Recorded here so the mistake isn't repeated.
+
+- Base NT dataset (genuine, untouched, not built by me):
+  `C:\Users\pete_\Dropbox\NTprogress\TranslateGemma\GemmaDataSet_HIN_DOG_NT.json`
+  (40,480 examples, Hindi↔Dogri, different Hindi source text than the xnr
+  project's NT dataset).
+- **The bug:** the couplets file `Addl Kangri-Dogri Couplets.csv` (1,062
+  rows, pipe-delimited `Source|0011LinesDogri`) was merged with
+  `--src-lang hi --tgt-lang dgo` — but its "Source" column is actually
+  **Kangri, not Hindi** (confirmed by comparing phrasing against the genuine
+  Hindi/Kangri columns of the hi-xnr couplets CSV — matching constructions
+  like `तुसां सारेआं जो`, `ह़`-nukta spellings). The filename says
+  "Kangri-Dogri"; Bob had described it as "Hindi-Dogri couplets" and neither
+  of us caught the mismatch before merging. Result: 1,062 pairs × 2
+  directions = **2,124 of 42,600 training examples (~5%) were Kangri text
+  mislabeled as Hindi** throughout the full training run.
+- Generalized [scripts/merge_csv_into_dataset.py](scripts/merge_csv_into_dataset.py)
+  with `--src-lang`/`--tgt-lang`/`--delimiter` flags along the way (default
+  to the original hi/xnr/comma behavior, so v1/v2 hi-xnr are unaffected) —
+  **this part is fine and kept**; only the specific merge invocation for
+  hi-dgo used the wrong `--src-lang`.
+- Training completed (10h6m, 2650 steps, final eval_loss 0.553 / eval
+  accuracy 87.8%) and the adapter was merged to a standalone model before
+  the mislabeling was noticed (while picking a CSV example for the
+  post-training sanity check — comparing it against genuine Hindi finally
+  made the mismatch obvious).
+- **Deleted** (2026-08-30, per Bob): `data\GemmaDataSet_HIN_DOG_Total.json`,
+  the same file in Dropbox, `output\translategemma-4b-hi-dgo-lora\` (adapter
+  + checkpoints + logs, 384 MB), `models\translategemma-4b-hi-dgo-merged\`
+  (8.1 GB). Scripts/pipeline code left in place. Bob will decide the
+  direction (relabel the couplets as `xnr` for a proper trilingual dataset,
+  drop that CSV and use NT-only Hindi↔Dogri data, or something else) before
+  retraining.
+- v1/v2 hi-xnr artifacts and both `translategemma`/`translategemma-v2`
+  Docker containers were never touched by any of this.
+
 ## Decisions & rationale
 
 - **QLoRA over full fine-tune / LoRA-fp16:** a 4B model in bf16 is ~8 GB of

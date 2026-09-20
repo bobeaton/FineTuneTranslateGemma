@@ -22,3 +22,4 @@ comparison/rating_webapp/dist/
 # Large local dataset copies are kept, but exclude HF cache artifacts
 .cache/
 /.vs
+.claude/scheduled_tasks.lock
