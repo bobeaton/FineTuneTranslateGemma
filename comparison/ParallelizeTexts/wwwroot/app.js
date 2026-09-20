@@ -414,10 +414,23 @@ function enterEditMode(cell, caretMode, x, y) {
   selection.mode = 'editing';
   selection.col = cell.dataset.col;
   selection.row = parseInt(cell.dataset.row, 10);
+  beginEditSession(selection.col, selection.row);
   cell.focus();
   if (caretMode === 'point') placeCaretAtPoint(cell, x, y);
   else if (caretMode === 'start') placeCaretAtStart(cell);
   else placeCaretAtEnd(cell);
+}
+
+// Snapshots a cell's text the moment editing starts, so commitEditIfAny can
+// push ONE textEdit undo entry per edit session. syncCellToState itself runs
+// on every keystroke (the grid's 'input' listener below) to keep
+// state.sourceLines/target.lines live for Find/Replace, drift checks, etc.
+// mid-edit -- pushing undo there would mean one undo step per keystroke
+// instead of per edit, so the snapshot/diff happens here instead.
+let editSessionOriginal = null;
+function beginEditSession(col, row) {
+  const arr = col === 'source' ? state.sourceLines : activeTarget()?.lines;
+  editSessionOriginal = { col, row, targetIndex: state.activeTargetIndex, value: arr ? (arr[row] ?? '') : '' };
 }
 
 function commitEditIfAny() {
@@ -425,11 +438,28 @@ function commitEditIfAny() {
   const cell = findCell(selection.col, selection.row);
   if (cell) {
     syncCellToState(cell);
+    endEditSession(cell.dataset.col, parseInt(cell.dataset.row, 10));
     cell.contentEditable = 'false';
     cell.classList.remove('editing');
     cell.classList.add('selected');
   }
   selection.mode = 'cell';
+}
+
+// Pushes the textEdit undo entry for the session begun in beginEditSession,
+// but only if the text actually changed and this is still that same cell --
+// a structural change mid-session (row split, multi-line paste) moves
+// editing to a different row and pushes its own undo entry that already
+// covers whatever was typed before it, so this is deliberately a no-op then.
+function endEditSession(col, row) {
+  const original = editSessionOriginal;
+  editSessionOriginal = null;
+  if (!original || original.col !== col || original.row !== row) return;
+  const arr = col === 'source' ? state.sourceLines : activeTarget()?.lines;
+  const newValue = arr ? (arr[row] ?? '') : '';
+  if (newValue !== original.value) {
+    pushUndo({ type: 'textEdit', col, row, previousValue: original.value, targetIndex: original.targetIndex });
+  }
 }
 
 function syncCellToState(cell) {
@@ -517,6 +547,11 @@ function handleEnterSplit() {
   const arr = col === 'source' ? state.sourceLines : activeTarget()?.lines;
   if (!arr) return;
   ensureIndex(arr, row);
+  // arr[row] already reflects every keystroke of the in-progress edit
+  // session (the 'input' listener keeps it live) up to this Enter press, so
+  // capturing it here and restoring it on undo reverses exactly the split --
+  // it doesn't need a separate undo entry for the typing that preceded it.
+  pushUndo({ type: 'splitCell', col, row, originalValue: arr[row], targetIndex: state.activeTargetIndex });
   const beforeSourceLen = state.sourceLines.length;
   arr[row] = before;
   arr.splice(row + 1, 0, after);
@@ -529,6 +564,7 @@ function handleEnterSplit() {
     newCell.contentEditable = 'true';
     newCell.classList.add('editing');
     selection.mode = 'editing'; selection.col = col; selection.row = row + 1;
+    beginEditSession(col, row + 1);
     newCell.focus();
     placeCaretAtStart(newCell);
   }
@@ -604,6 +640,25 @@ function combineCellWithPrevious(col, row) {
   combineCellWithNext(col, row - 1);
 }
 
+// Swaps this cell (in the same column only) with the one above or below it,
+// following the current "Combine With" direction setting -- right-click
+// menu only, since it's rare enough not to need its own mini-btn. Unlike
+// combine, this never changes row counts, so no drift check is needed.
+function swapCellWithDirection(col, row) {
+  const arr = col === 'source' ? state.sourceLines : activeTarget()?.lines;
+  if (!arr) return;
+  const otherRow = combineDirection === 'previous' ? row - 1 : row + 1;
+  if (otherRow < 0 || otherRow >= arr.length) return;
+  pushUndo({ type: 'swapCell', col, row1: row, row2: otherRow, targetIndex: state.activeTargetIndex });
+  const tmp = arr[row];
+  arr[row] = arr[otherRow];
+  arr[otherRow] = tmp;
+  markDirty();
+  renderBodyAndTabs();
+  selection.mode = 'none';
+  selectCellNoEdit(col, row);
+}
+
 // Reverses the most recent deleteCell/deleteRow, re-inserting the removed
 // text at the same index. Targets the target column by stored index (not
 // "whichever tab is active now"), so undoing still lands correctly even if
@@ -655,6 +710,52 @@ function performUndo() {
     renderAll();
     selectCellNoEdit(entry.col, entry.row);
     showToast('Undid combine cell.');
+    return;
+  }
+
+  if (entry.type === 'splitCell') {
+    const arr = entry.col === 'source' ? state.sourceLines : state.targets[entry.targetIndex]?.lines;
+    if (arr) {
+      arr[entry.row] = entry.originalValue;
+      arr.splice(entry.row + 1, 1);
+      markDirty();
+    }
+    if (entry.col === 'target' && state.targets[entry.targetIndex]) state.activeTargetIndex = entry.targetIndex;
+    selection.mode = 'none';
+    renderAll();
+    selectCellNoEdit(entry.col, entry.row);
+    showToast('Undid row split.');
+    return;
+  }
+
+  if (entry.type === 'pasteSplit') {
+    const arr = entry.col === 'source' ? state.sourceLines : state.targets[entry.targetIndex]?.lines;
+    if (arr) {
+      arr[entry.row] = entry.originalValue;
+      arr.splice(entry.row + 1, entry.insertedCount);
+      markDirty();
+    }
+    if (entry.col === 'target' && state.targets[entry.targetIndex]) state.activeTargetIndex = entry.targetIndex;
+    selection.mode = 'none';
+    renderAll();
+    selectCellNoEdit(entry.col, entry.row);
+    showToast('Undid paste split.');
+    return;
+  }
+
+  if (entry.type === 'swapCell') {
+    const arr = entry.col === 'source' ? state.sourceLines : state.targets[entry.targetIndex]?.lines;
+    if (arr) {
+      const tmp = arr[entry.row1];
+      arr[entry.row1] = arr[entry.row2];
+      arr[entry.row2] = tmp;
+      markDirty();
+    }
+    if (entry.col === 'target' && state.targets[entry.targetIndex]) state.activeTargetIndex = entry.targetIndex;
+    selection.mode = 'none';
+    renderAll();
+    selectCellNoEdit(entry.col, entry.row1);
+    showToast('Undid swap.');
     return;
   }
 
@@ -822,6 +923,25 @@ function showContextMenu(x, y) {
     'disabled', contextMenuRow + 1 >= state.sourceLines.length);
   menu.querySelector('[data-ctx="combineTargetCell"]')?.toggleAttribute(
     'disabled', !hasTarget || contextMenuRow + 1 >= activeTarget().lines.length);
+  // Swap follows the same directionality as the "Combine With" mini-btn
+  // arrow (a single global setting, not a per-click choice like the
+  // Combine-with-previous/-next pair above), so there's just one Swap
+  // button per column and its target row/label are computed from
+  // combineDirection each time the menu opens.
+  const swapRow = combineDirection === 'previous' ? contextMenuRow - 1 : contextMenuRow + 1;
+  const swapWord = combineDirection === 'previous' ? 'previous' : 'next';
+  const swapSourceBtn = menu.querySelector('[data-ctx="swapSourceCell"]');
+  if (swapSourceBtn) {
+    swapSourceBtn.dataset.labelBoth = `Swap Source cell with ${swapWord}`;
+    swapSourceBtn.dataset.labelOnly = `Swap with ${swapWord}`;
+    swapSourceBtn.toggleAttribute('disabled', swapRow < 0 || swapRow >= state.sourceLines.length);
+  }
+  const swapTargetBtn = menu.querySelector('[data-ctx="swapTargetCell"]');
+  if (swapTargetBtn) {
+    swapTargetBtn.dataset.labelBoth = `Swap Target cell with ${swapWord}`;
+    swapTargetBtn.dataset.labelOnly = `Swap with ${swapWord}`;
+    swapTargetBtn.toggleAttribute('disabled', !hasTarget || swapRow < 0 || swapRow >= activeTarget().lines.length);
+  }
   // Right-clicking directly on a Source or Target cell narrows the menu to
   // just that column's items (and drops the column name from their labels,
   // since it's now obvious from where you clicked) -- right-clicking the
@@ -871,6 +991,8 @@ document.querySelectorAll('#cellContextMenu [data-ctx]').forEach((btn) => {
       case 'combinePreviousTargetCell': combineCellWithPrevious('target', row); break;
       case 'combineSourceCell': combineCellWithNext('source', row); break;
       case 'combineTargetCell': combineCellWithNext('target', row); break;
+      case 'swapSourceCell': swapCellWithDirection('source', row); break;
+      case 'swapTargetCell': swapCellWithDirection('target', row); break;
       case 'quoteInsertMode': startQuoteInsertMode(row); break;
     }
   });
@@ -922,6 +1044,13 @@ function insertPastedText(text) {
     return;
   }
 
+  // Same reasoning as handleEnterSplit: arr[row] already reflects this edit
+  // session's typing so far, so capturing it here and restoring it on undo
+  // (dropping the rows this paste inserted) reverses exactly the paste.
+  pushUndo({
+    type: 'pasteSplit', col, row, originalValue: arr[row],
+    insertedCount: lines.length - 1, targetIndex: state.activeTargetIndex,
+  });
   const beforeSourceLen = state.sourceLines.length;
   arr[row] = before + lines[0];
   const middle = lines.slice(1, -1);
@@ -935,6 +1064,7 @@ function insertPastedText(text) {
   if (lastCell) {
     lastCell.contentEditable = 'true'; lastCell.classList.add('editing');
     selection.mode = 'editing'; selection.col = col; selection.row = lastRow;
+    beginEditSession(col, lastRow);
     lastCell.focus();
     placeCaretAtOffset(lastCell, lines[lines.length - 1].length);
   }
