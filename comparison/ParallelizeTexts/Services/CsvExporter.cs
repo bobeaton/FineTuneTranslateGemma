@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Text;
 
 namespace ParallelizeTexts.Services;
@@ -24,7 +25,11 @@ public static class CsvExporter
 
         for (int i = 0; i < rowCount; i++)
         {
-            sb.Append(CleanField(i < project.SourceLines.Count ? project.SourceLines[i] : ""));
+            string sourceLine = i < project.SourceLines.Count ? project.SourceLines[i] : "";
+            if (IsReferenceMarker(sourceLine) || project.Targets.Any(t => i < t.Lines.Count && IsReferenceMarker(t.Lines[i])))
+                continue;
+
+            sb.Append(CleanField(sourceLine));
             foreach (var target in project.Targets)
             {
                 sb.Append('|');
@@ -43,4 +48,10 @@ public static class CsvExporter
     // left to break the format if one ever sneaks in.
     private static string CleanField(string text) =>
         text.Replace('|', '｜').Replace("\r\n", " ").Replace('\n', ' ').Replace('\r', ' ');
+
+    // Scripture-reference rows (e.g. "=== XNR2DOG-67-REV-022: dgo v3-5 | xnr
+    // v3-5 ===") are kept in the project so the verses can be looked up while
+    // parallelizing, but they aren't real parallel data and must be dropped
+    // from the CSV export.
+    private static bool IsReferenceMarker(string text) => text.TrimStart().StartsWith("===");
 }
