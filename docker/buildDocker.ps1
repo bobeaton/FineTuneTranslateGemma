@@ -104,7 +104,15 @@ if (Test-Path $Model) {
     $totalSize = ($files | Measure-Object Length -Sum).Sum
     $maxWrite = ($files | Measure-Object -Property LastWriteTimeUtc -Maximum).Maximum.Ticks
     $syncMarker = "$resolved|$totalSize|$maxWrite"
-    $volumeName = "translategemma-model-cache"
+    # Namespace the cache volume per container so different models served under
+    # different -ContainerName values never overwrite each other's synced copy.
+    # The original default container's volume name is kept unchanged so
+    # existing setups don't pay for a needless re-sync.
+    $volumeName = if ($ContainerName -eq "translategemma") {
+        "translategemma-model-cache"
+    } else {
+        "translategemma-model-cache-$ContainerName"
+    }
 
     Write-Host "Syncing local model into cache volume '$volumeName' (skipped if already up to date)..."
     docker run --rm `
