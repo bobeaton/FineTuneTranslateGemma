@@ -1,15 +1,17 @@
-"""Translate Hindi<->Kangri with (fine-tuned) TranslateGemma.
+"""Translate between two language codes with (fine-tuned) TranslateGemma.
 
 Loads the 4-bit base model, plus the LoRA adapter from training unless
 --base-only is given (useful for before/after comparison).
 
 Usage:
   python scripts/translate.py --direction hi2xnr --text "यीशु ने कहा, मैं ही मार्ग हूँ।"
+  python scripts/translate.py --direction xnr2dgo --text "..." --adapter output/translategemma-4b-xnr-dgo-lora/final
   python scripts/translate.py --direction xnr2hi --text "..." --base-only
   python scripts/translate.py --direction hi2xnr            # interactive: type lines, Ctrl+Z/Ctrl+C to quit
 """
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -19,7 +21,14 @@ from tg_common import DEFAULT_MODEL, render_prompt, resolve_model_id
 WORKSPACE = Path(__file__).resolve().parent.parent
 DEFAULT_ADAPTER = WORKSPACE / "output" / "translategemma-4b-hi-xnr-lora" / "final"
 
-LANGS = {"hi2xnr": ("hi", "xnr"), "xnr2hi": ("xnr", "hi")}
+
+def parse_direction(direction: str) -> tuple[str, str]:
+    """'src2tgt' (e.g. 'xnr2dgo') -> ('xnr', 'dgo'), for any language codes."""
+    m = re.fullmatch(r"([a-zA-Z-]+)2([a-zA-Z-]+)", direction)
+    if not m:
+        raise argparse.ArgumentTypeError(
+            f"--direction must look like 'src2tgt' (e.g. 'hi2xnr'), got {direction!r}")
+    return m.group(1), m.group(2)
 
 
 def load_model(model_id: str, adapter: str | None):
@@ -73,7 +82,8 @@ def translate(model, tokenizer, text: str, src: str, tgt: str) -> str:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--direction", choices=list(LANGS), required=True)
+    ap.add_argument("--direction", required=True,
+                    help="'src2tgt' language codes, e.g. hi2xnr, xnr2dgo")
     ap.add_argument("--text", help="text to translate; omit for interactive mode")
     ap.add_argument("--model-id", default=DEFAULT_MODEL)
     ap.add_argument("--adapter", default=str(DEFAULT_ADAPTER))
@@ -86,7 +96,7 @@ def main():
         print(f"NOTE: adapter not found at {adapter}; using base model only.")
         adapter = None
 
-    src, tgt = LANGS[args.direction]
+    src, tgt = parse_direction(args.direction)
     model, tokenizer = load_model(resolve_model_id(args.model_id), adapter)
 
     if args.text:
